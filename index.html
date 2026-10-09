@@ -18,7 +18,7 @@
 <meta http-equiv="Expires" content="0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700;900&family=Playfair+Display:ital,wght@0,700;0,900;1,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700;900&family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Great+Vibes&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#131019;
@@ -80,9 +80,10 @@ header::after{
 }
 .brand .titles{min-width:0;}
 .brand .sub{
-  font-family:'Playfair Display', serif; font-style:italic; font-weight:700;
-  font-size:16.5px; letter-spacing:0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  font-family:'Great Vibes', cursive; font-weight:400;
+  font-size:27px; line-height:1.15; letter-spacing:0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   background:var(--gold-grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,0.35));
 }
 .brand .page-title{font-size:11.5px; color:var(--text-faint); font-weight:600; letter-spacing:0.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .live-dot{
@@ -109,13 +110,13 @@ main{flex:1 1 auto; overflow-y:auto; padding:16px 14px calc(28px + env(safe-area
 .btn.block{width:100%;}
 .btn.icon-only{padding:9px; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:18px;}
 .btn:disabled{opacity:0.4;}
-input:focus{outline:2px solid var(--gold); outline-offset:1px;}
+input:focus, textarea:focus{outline:2px solid var(--gold); outline-offset:1px;}
 .empty-hint{color:var(--text-faint); font-size:12.5px; text-align:center; padding:26px 10px; border:1px dashed var(--border); border-radius:var(--radius);}
 .visually-hidden-file{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;}
 ::-webkit-scrollbar{width:0; height:0;}
 
 /* ===== gallery (本棚) ===== */
-.book-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:14px;}
+.book-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
 .book-card{
   position:relative; aspect-ratio:3/4; border-radius:var(--radius); overflow:hidden;
   border:1px solid var(--border); background:var(--surface); padding:0; display:block; width:100%;
@@ -129,19 +130,19 @@ input:focus{outline:2px solid var(--gold); outline-offset:1px;}
 .book-photo{width:100%; height:100%; object-fit:cover; display:block; -webkit-user-drag:none; user-select:none;}
 .book-photo.placeholder{
   display:flex; align-items:center; justify-content:center; color:rgba(10,8,14,0.55);
-  font-family:'Oswald',sans-serif; font-weight:700; font-size:54px;
+  font-family:'Oswald',sans-serif; font-weight:700; font-size:34px;
 }
 .book-name-wrap{
-  position:absolute; left:0; right:0; bottom:0; padding:24px 10px 10px;
+  position:absolute; left:0; right:0; bottom:0; padding:18px 7px 7px;
   background:linear-gradient(0deg, rgba(10,8,14,0.92), rgba(10,8,14,0));
 }
 .book-name-wrap::before{
-  content:''; position:absolute; left:14px; right:14px; top:14px; height:1px;
+  content:''; position:absolute; left:9px; right:9px; top:10px; height:1px;
   background:linear-gradient(90deg, transparent, rgba(230,195,120,0.75), transparent);
 }
-.book-name{color:#fff; font-size:14px; font-weight:700; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.6); letter-spacing:0.2px;}
+.book-name{color:#fff; font-size:11.5px; font-weight:700; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.6); letter-spacing:0.1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .book-live-dot{
-  position:absolute; top:10px; right:10px; z-index:3; width:9px; height:9px; border-radius:50%;
+  position:absolute; top:7px; right:7px; z-index:3; width:8px; height:8px; border-radius:50%;
   background:var(--success); box-shadow:0 0 8px rgba(56,202,160,0.9), 0 0 0 2px rgba(10,8,14,0.55);
   animation:liveDotPulse 1.8s ease-in-out infinite;
 }
@@ -232,6 +233,12 @@ main.full-bleed{padding:0; overflow:hidden;}
   display:flex; align-items:center; gap:10px; padding:8px; background:var(--surface);
   border:1px solid var(--border); border-radius:12px;
 }
+.reorder-row.excluded{opacity:0.6;}
+.reorder-rank{
+  width:32px; height:32px; flex:0 0 auto; border-radius:8px; text-align:center;
+  background:var(--surface2); border:1px solid var(--border); color:var(--gold);
+  font-family:inherit; font-weight:800; font-size:13px; font-variant-numeric:tabular-nums;
+}
 .reorder-main{
   display:flex; align-items:center; gap:10px; flex:1 1 auto; min-width:0;
   background:none; border:none; padding:0; margin:0; text-align:left; font:inherit; color:inherit; cursor:pointer;
@@ -241,10 +248,26 @@ main.full-bleed{padding:0; overflow:hidden;}
   display:flex; align-items:center; justify-content:center; color:rgba(10,8,14,0.55);
   font-family:'Oswald',sans-serif; font-weight:700; font-size:17px;
 }
-.reorder-name{flex:1 1 auto; min-width:0; font-size:14px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.reorder-btns{display:flex; gap:6px; flex:0 0 auto;}
+.reorder-text{flex:1 1 auto; min-width:0;}
+.reorder-name{font-size:14px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.reorder-sub{font-size:10.5px; color:var(--text-faint); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.reorder-btns{display:flex; flex-direction:column; gap:6px; flex:0 0 auto;}
+.reorder-btns-row{display:flex; gap:6px;}
 .reorder-btns .btn{width:34px; height:34px; padding:0; font-size:13px;}
 .reorder-btns .btn:disabled{opacity:0.25;}
+.ops-toggle{
+  width:74px; height:24px; padding:0; font-size:10.5px; font-weight:700; letter-spacing:0.2px;
+  border-radius:7px; white-space:nowrap; overflow:hidden;
+}
+.ops-toggle.active{font-size:9.5px; background:var(--gold-grad); color:#241a05; border-color:transparent;}
+
+/* ===== rank import (ナンバー登録) ===== */
+.rank-import-intro{font-size:12.5px; color:var(--text-faint); text-align:left; line-height:1.6; margin:0 0 12px;}
+.rank-textarea{
+  width:100%; min-height:300px; background:var(--surface); border:1px solid var(--border);
+  border-radius:12px; color:var(--text); font-size:14px; font-family:inherit; line-height:1.7;
+  padding:12px; resize:vertical; box-sizing:border-box;
+}
 
 /* ===== modal ===== */
 .modal-overlay{
@@ -303,7 +326,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-6 - 2026-10-09';
+const BUILD_STAMP = 'otokohon-9 - 2026-10-09';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -432,6 +455,24 @@ let staffOrder = null;           // [id,...] from otokohonOrder — custom displ
                                   // (never touches config/staff itself, so X8 TIME CHECK's own staff-select
                                   // grid keeps whatever order it already has)
 
+let excludedStaff = {};          // {id: true} from otokohonExcluded — staff flagged 運営 (operations/
+                                  // management, not a customer-facing host): even once clocked in with
+                                  // a photo in X8 TIME CHECK, they never appear in THIS app's gallery.
+                                  // Stored separately from config/staff, same as otokohonOrder — X8 TIME
+                                  // CHECK itself is never touched or made aware of this flag.
+
+// A pasted-in monthly ranking ("9月ナンバー" etc.), keyed by NAME (not id)
+// so it can be prepared before someone even has a 宣材写真 yet, and still
+// matches them once they do. See handleNewlyPhotographedStaff / openRankImport.
+let nameRankTable = {};          // {name: rankNumber} from otokohonNameRank
+let knownPhotoStaffIds = null;   // Set of ids with a staffPhotos entry as of the last snapshot; null
+                                  // until the first snapshot. Diffed on every update to catch a 宣材写真
+                                  // newly appearing, without ever touching anyone else's position.
+let rankImportDraft = null;      // live textarea contents for the ナンバー登録 screen, kept in JS state
+                                  // (not just the DOM) so an unrelated Firebase update mid-paste can't
+                                  // wipe out what the admin is in the middle of typing; null = show the
+                                  // saved table instead of a draft.
+
 // Live "who's currently in" status, so the gallery can show only staff who
 // are presently clocked in (promotional photo appears on 出勤, disappears
 // on 退勤) — this is a customer-facing "who's working tonight" board, not
@@ -476,8 +517,14 @@ async function init(){
   subscribeStaffPhotos();
   subscribeSelection();
   subscribeStaffOrder();
+  subscribeExcludedStaff();
+  subscribeNameRankTable();
   renderApp();
   document.getElementById('app').addEventListener('click', onAppClick);
+  document.getElementById('app').addEventListener('change', onAppChange);
+  document.getElementById('app').addEventListener('keydown', onAppKeydown);
+  document.getElementById('app').addEventListener('focusin', onAppFocusIn);
+  document.getElementById('app').addEventListener('input', onAppInput);
   document.getElementById('main').addEventListener('pointerdown', onMainPointerDown);
   document.getElementById('main').addEventListener('pointermove', onMainPointerMove);
   document.getElementById('main').addEventListener('pointerup', onMainPointerUp);
@@ -566,7 +613,19 @@ function subscribeStaffPhotos(){
       const flat = {};
       for(const id in raw){ if(raw[id] && raw[id].dataUrl) flat[id] = raw[id].dataUrl; }
       staffPhotos = flat;
+      handleNewlyPhotographedStaff(flat);
       refreshResolvedGalleryPhotos();
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
+function subscribeNameRankTable(){
+  if(!db) return;
+  db.doc('otokohonNameRank').onSnapshot(
+    (snap)=>{
+      nameRankTable = (snap.exists && snap.data()) || {};
       renderApp();
     },
     ()=>{}
@@ -597,6 +656,17 @@ function subscribeStaffOrder(){
   );
 }
 
+function subscribeExcludedStaff(){
+  if(!db) return;
+  db.doc('otokohonExcluded').onSnapshot(
+    (snap)=>{
+      excludedStaff = (snap.exists && snap.data()) || {};
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
 // The display order this app shows (gallery grid + reorder screen): the
 // saved order, limited to staff who still exist, with any staff NOT yet in
 // it (brand new, or before anyone has ever reordered) appended at the end
@@ -611,10 +681,12 @@ function orderedStaffList(){
 
 // The gallery itself only shows staff who are CURRENTLY clocked in — this
 // board is for customers to see who's working right now, not a full staff
-// list. The reorder screen still uses orderedStaffList() (everyone), since
-// relative order should be set up for staff before their first shift too.
+// list. 運営 (excludedStaff) never appear here even while clocked in with a
+// photo. The reorder screen still uses orderedStaffList() (everyone,
+// 運営 included), since relative order — and the 運営 toggle itself — need
+// to be set up for staff before their first shift too.
 function visibleGalleryStaffList(){
-  return orderedStaffList().filter(s=>attendanceStatus[s.id]);
+  return orderedStaffList().filter(s=>attendanceStatus[s.id] && !excludedStaff[s.id]);
 }
 
 async function resolveInlinePhoto(photoRef){
@@ -911,6 +983,181 @@ async function moveStaff(id, dir){
   try{ await db.doc('otokohonOrder').set({ order: ids, ts: Date.now() }); }
   catch(e){ showToast('並び替えの保存に失敗しました'); }
 }
+// Lets the admin type an exact 1-indexed position instead of tapping ▲▼
+// repeatedly — built so a whole month's sales ranking (順位) can be typed
+// in staff-by-staff and the gallery/reorder order follows it immediately,
+// writing into the exact same otokohonOrder used everywhere else. An
+// invalid or no-op entry just re-renders, which snaps the input back to
+// the current real position (reorderRowHtml always derives value from the
+// live order), so there's nothing to validate beyond "is this a number".
+async function setStaffPosition(id, rawValue){
+  const ids = orderedStaffList().map(s=>s.id);
+  const from = ids.indexOf(id);
+  if(from===-1){ renderApp(); return; }
+  const parsed = parseInt(String(rawValue).replace(/[^0-9]/g,''), 10);
+  if(!Number.isFinite(parsed) || parsed<1){ renderApp(); return; }
+  const to = Math.min(ids.length, parsed) - 1;
+  if(to===from){ renderApp(); return; }
+  ids.splice(from, 1);
+  ids.splice(to, 0, id);
+  staffOrder = ids;
+  renderApp();
+  if(!db) return;
+  try{ await db.doc('otokohonOrder').set({ order: ids, ts: Date.now() }); }
+  catch(e){ showToast('並び替えの保存に失敗しました'); }
+}
+
+// Marks/unmarks a staff member as 運営 (operations/management, not a
+// customer-facing host): once set, visibleGalleryStaffList() excludes them
+// even while clocked in with a photo in X8 TIME CHECK. Written to its own
+// otokohonExcluded doc, same pattern as otokohonOrder — config/staff and
+// X8 TIME CHECK are never touched.
+async function toggleOpsStaff(id){
+  const next = Object.assign({}, excludedStaff);
+  if(next[id]) delete next[id]; else next[id] = true;
+  excludedStaff = next;
+  renderApp();
+  if(!db) return;
+  try{ await db.doc('otokohonExcluded').set(next); }
+  catch(e){ showToast('運営設定の保存に失敗しました'); }
+}
+
+/* ---------- monthly name-rank import (「9月ナンバー」など) ---------- */
+
+// Inserts `id` (whose stored rank is `rank`) right before the first OTHER
+// ranked-and-photographed staff member with an equal-or-larger rank number
+// — i.e. in order relative to its ranked peers only. Unranked people (or
+// ranked people without a photo yet) are skipped over wherever they
+// happen to sit rather than used as a stopping point, since a manual ▲▼
+// move can freely scatter them anywhere, including ahead of every ranked
+// person; stopping at the first one (instead of skipping past it) would
+// wrongly treat "ranked block starts at the front" as a fixed rule. Falls
+// back to the very end when no larger-or-equal ranked peer exists.
+function insertByNameRank(order, id, rank){
+  const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
+  const withoutId = order.filter(x=>x!==id);
+  let insertAt = withoutId.length;
+  for(let i=0;i<withoutId.length;i++){
+    const other = byId[withoutId[i]];
+    const otherRank = other && nameRankTable[other.name];
+    const otherHasPhoto = other && !!staffPhotos[other.id];
+    if(other && Number.isFinite(otherRank) && otherHasPhoto && otherRank>=rank){ insertAt = i; break; }
+  }
+  withoutId.splice(insertAt, 0, id);
+  return withoutId;
+}
+
+// Explicit, one-shot bulk apply: every staff member who (a) already has a
+// 宣材写真 right now and (b) has a name-matched entry in nameRankTable moves
+// into a contiguous block at the front, sorted by that rank. Everyone else
+// (no entry, or ranked but no photo yet) keeps their existing relative
+// order, appended after. Called only when the admin explicitly saves the
+// ranking table — ongoing "slot in once the photo appears" is handled one
+// person at a time by handleNewlyPhotographedStaff instead, so it never
+// re-fights manual reordering done afterward.
+function applyNameRankOrderNow(){
+  const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
+  const current = orderedStaffList().map(s=>s.id);
+  const ranked = [], rest = [];
+  current.forEach(id=>{
+    const s = byId[id];
+    const rank = s && nameRankTable[s.name];
+    if(s && Number.isFinite(rank) && staffPhotos[id]) ranked.push({ id, rank });
+    else rest.push(id);
+  });
+  ranked.sort((a,b)=>a.rank-b.rank);
+  return ranked.map(r=>r.id).concat(rest);
+}
+
+// Detects a staff member's 宣材写真 newly appearing (vs the previous
+// staffPhotos snapshot) and, if their name matches nameRankTable, slots
+// JUST that person into the matching position automatically — "名前が同じ
+// やつは写真上がったら勝手にナンバー並び替えになる様にして". Never touches
+// anyone else's position, so it can't undo reordering done by hand since.
+// The very first snapshot (page load) only records the baseline; staff who
+// already had a photo then were already accounted for whenever the table
+// was last saved, so inserting them again here would be redundant.
+function handleNewlyPhotographedStaff(flat){
+  const ids = Object.keys(flat);
+  if(knownPhotoStaffIds===null){ knownPhotoStaffIds = new Set(ids); return; }
+  const freshlyPhotographed = ids.filter(id=>!knownPhotoStaffIds.has(id));
+  knownPhotoStaffIds = new Set(ids);
+  if(!freshlyPhotographed.length) return;
+  const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
+  const matched = freshlyPhotographed
+    .map(id=>({ id, s: byId[id], rank: byId[id] && nameRankTable[byId[id].name] }))
+    .filter(m=>m.s && Number.isFinite(m.rank))
+    .sort((a,b)=>a.rank-b.rank); // process in rank order, in case several appear in the same snapshot
+  if(!matched.length) return;
+  let order = orderedStaffList().map(s=>s.id);
+  matched.forEach(m=>{ order = insertByNameRank(order, m.id, m.rank); });
+  staffOrder = order;
+  renderApp();
+  if(db) db.doc('otokohonOrder').set({ order, ts: Date.now() }).catch(()=>{});
+  showToast(matched.map(m=>m.s.name).join('、') + ' をナンバー順に自動配置しました');
+}
+
+// Formats the saved table back into pasteable "name␉rank" lines, sorted by
+// rank, so re-opening the screen shows the current state for review/editing
+// rather than a blank box.
+function formatNameRankTable(table){
+  return Object.keys(table||{})
+    .map(name=>({ name, rank: table[name] }))
+    .sort((a,b)=>a.rank-b.rank)
+    .map(e=>`${e.name}\t${e.rank}`)
+    .join('\n');
+}
+
+// Parses pasted lines of "name <tab/comma/spaces> number" — exactly what a
+// 2-column copy from Excel/OneDrive pastes as (tab-separated, one row per
+// line) — into a {name: rank} map. Blank lines and lines with no trailing
+// number are silently skipped rather than rejecting the whole paste.
+function parseRankImportText(text){
+  const table = {};
+  String(text||'').split(/\r?\n/).forEach(line=>{
+    const trimmed = line.trim();
+    if(!trimmed) return;
+    const m = trimmed.match(/^(.*\S)[\t,\s]+(\d+)\s*$/);
+    if(m) table[m[1].trim()] = parseInt(m[2], 10);
+  });
+  return table;
+}
+
+function openRankImport(){
+  rankImportDraft = null;
+  view = 'rankImport';
+  renderApp();
+}
+function backFromRankImport(){
+  rankImportDraft = null;
+  view = 'reorder';
+  renderApp();
+}
+async function saveRankImport(){
+  const ta = document.getElementById('rankImportTextarea');
+  const text = ta ? ta.value : (rankImportDraft || '');
+  const parsed = parseRankImportText(text);
+  const count = Object.keys(parsed).length;
+  if(!count){ showToast('「名前　数字」の行が見つかりませんでした'); return; }
+  nameRankTable = parsed;
+  knownPhotoStaffIds = new Set(Object.keys(staffPhotos)); // these are all "already accounted for" as of this save
+  const newOrder = applyNameRankOrderNow();
+  staffOrder = newOrder;
+  rankImportDraft = null;
+  view = 'reorder';
+  renderApp();
+  if(!db) return;
+  try{
+    await db.doc('otokohonNameRank').set(parsed);
+    await db.doc('otokohonOrder').set({ order: newOrder, ts: Date.now() });
+    const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
+    const appliedNow = newOrder.filter(id=>{
+      const s = byId[id];
+      return s && Number.isFinite(parsed[s.name]) && staffPhotos[id];
+    }).length;
+    showToast(count + '件を保存しました（今すぐ反映: ' + appliedNow + '人。写真が未登録の人は、写真が上がり次第自動で反映されます）');
+  }catch(e){ showToast('ナンバーの保存に失敗しました'); }
+}
 
 // Password is asked every time, never cached for the session — matches
 // how ログ/設定 work in X8 TIME CHECK.
@@ -1029,6 +1276,10 @@ function onAppClick(e){
   else if(action==='finishGalleryReorder') finishGalleryReorder();
   else if(action==='moveStaffUp') moveStaff(el.dataset.id, -1);
   else if(action==='moveStaffDown') moveStaff(el.dataset.id, 1);
+  else if(action==='toggleOpsStaff') toggleOpsStaff(el.dataset.id);
+  else if(action==='openRankImport') openRankImport();
+  else if(action==='backFromRankImport') backFromRankImport();
+  else if(action==='saveRankImport') saveRankImport();
   else if(action==='requestEditPhoto') requestEditPhoto(el.dataset.id);
   else if(action==='selectStaffPhoto') selectStaffPhotoAsActive(el.dataset.id);
   else if(action==='selectClockinPhoto'){
@@ -1038,6 +1289,34 @@ function onAppClick(e){
   else if(action==='pickPromoPhotoFile') pickPromoPhotoFile();
   else if(action==='modalCancel') closeModal();
   else if(action==='modalPasswordSubmit') submitModalPassword();
+}
+
+// The reorder screen's rank input (順位) is a text field, not a button, so
+// it needs its own delegated handlers rather than onAppClick's data-action
+// dispatch. change (fires on blur/commit, not per keystroke) commits the
+// new position; Enter blurs so a mobile "done"/"go" key commits too; focus
+// selects the existing digits so retyping a whole month's ranking is just
+// tap-type-tap-type down the list.
+function onAppChange(e){
+  const el = e.target.closest('[data-action="setStaffPosition"]');
+  if(!el) return;
+  setStaffPosition(el.dataset.id, el.value);
+}
+function onAppKeydown(e){
+  if(e.key!=='Enter') return;
+  const el = e.target.closest('[data-action="setStaffPosition"]');
+  if(el) el.blur();
+}
+function onAppFocusIn(e){
+  const el = e.target.closest('[data-action="setStaffPosition"]');
+  if(el && typeof el.select==='function') el.select();
+}
+// Keeps rankImportDraft in sync with every keystroke (not just on save) so
+// that if an unrelated Firebase update forces a re-render while the admin
+// is mid-paste, rankImportHtml() can restore exactly what they'd typed
+// instead of silently reverting to the last-saved table.
+function onAppInput(e){
+  if(e.target && e.target.id==='rankImportTextarea') rankImportDraft = e.target.value;
 }
 
 /* ---------- render ---------- */
@@ -1058,9 +1337,17 @@ function renderApp(){
     header.innerHTML = `
       <button class="btn icon-only ghost" data-action="backFromReorder">‹</button>
       <div class="header-title-center">並び替え</div>
-      <div class="header-spacer"></div>
+      <button class="btn icon-only ghost" data-action="openRankImport" title="ナンバー登録">#</button>
     `;
     main.innerHTML = reorderHtml();
+  } else if(view==='rankImport'){
+    main.classList.remove('full-bleed');
+    header.innerHTML = `
+      <button class="btn icon-only ghost" data-action="backFromRankImport">‹</button>
+      <div class="header-title-center">ナンバー登録</div>
+      <div class="header-spacer"></div>
+    `;
+    main.innerHTML = rankImportHtml();
   } else {
     main.classList.remove('full-bleed');
     header.innerHTML = galleryReorderMode ? `
@@ -1070,7 +1357,7 @@ function renderApp(){
       <div class="brand">
         <div class="mark">X8</div>
         <div class="titles">
-          <div class="sub">IKEMEN LIST</div>
+          <div class="sub">Ikemen List</div>
           <div class="page-title"><span class="live-dot"></span>本日${visibleGalleryStaffList().length}名出勤中</div>
         </div>
       </div>
@@ -1204,25 +1491,47 @@ function reorderHtml(){
   const list = orderedStaffList();
   if(!list.length) return `<div class="empty-hint">スタッフが登録されていません</div>`;
   return `
-    <div class="hint" style="margin-bottom:14px;">▲▼でIKEMEN LISTに並ぶ順番を変えられます。名前をタップすると写真を編集できます（出勤中でなくてもOK）。</div>
+    <div class="hint" style="margin-bottom:14px;">数字を直接入力すると、その順位に移動します。右上の「#」から売上ナンバーをまとめて登録すると、名前が一致する人は写真が上がり次第、自動でその順位になります。▲▼でも1つずつ動かせます。「運営」ボタンでIKEMEN LISTに出さない人を設定できます。名前をタップすると写真を編集できます（出勤中でなくてもOK）。</div>
     <div class="reorder-list">${list.map((s,i)=>reorderRowHtml(s, i, list.length)).join('')}</div>
   `;
 }
 function reorderRowHtml(s, i, total){
   const photo = resolvedGalleryPhotos[s.id];
+  const excluded = !!excludedStaff[s.id];
   return `
-    <div class="reorder-row">
+    <div class="reorder-row${excluded ? ' excluded' : ''}">
+      <input class="reorder-rank" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+        value="${i+1}" data-action="setStaffPosition" data-id="${escapeHtml(s.id)}" aria-label="順位">
       <button class="reorder-main" data-action="openStaffDetail" data-id="${escapeHtml(s.id)}" data-return="reorder">
         ${photo
           ? `<img class="reorder-thumb" src="${photo}" alt="">`
           : `<div class="reorder-thumb placeholder" style="background:${colorFor(s.id)}">${escapeHtml((s.name||'?').slice(0,1))}</div>`}
-        <div class="reorder-name">${escapeHtml(s.name)}</div>
+        <div class="reorder-text">
+          <div class="reorder-name">${escapeHtml(s.name)}</div>
+          ${excluded ? `<div class="reorder-sub">運営（IKEMEN LISTに非表示）</div>` : ''}
+        </div>
       </button>
       <div class="reorder-btns">
-        <button class="btn icon-only ghost" data-action="moveStaffUp" data-id="${escapeHtml(s.id)}" ${i===0 ? 'disabled' : ''}>▲</button>
-        <button class="btn icon-only ghost" data-action="moveStaffDown" data-id="${escapeHtml(s.id)}" ${i===total-1 ? 'disabled' : ''}>▼</button>
+        <div class="reorder-btns-row">
+          <button class="btn icon-only ghost" data-action="moveStaffUp" data-id="${escapeHtml(s.id)}" ${i===0 ? 'disabled' : ''}>▲</button>
+          <button class="btn icon-only ghost" data-action="moveStaffDown" data-id="${escapeHtml(s.id)}" ${i===total-1 ? 'disabled' : ''}>▼</button>
+        </div>
+        <button class="btn ghost ops-toggle${excluded ? ' active' : ''}" data-action="toggleOpsStaff" data-id="${escapeHtml(s.id)}">${excluded ? '✓運営' : '運営'}</button>
       </div>
     </div>
+  `;
+}
+
+function rankImportHtml(){
+  const text = rankImportDraft!==null ? rankImportDraft : formatNameRankTable(nameRankTable);
+  return `
+    <div class="rank-import-intro">
+      Excelなどで「名前」と「数字」の2列を選んでコピーし、下の欄にそのまま貼り付けて「保存して反映」を押してください（1行に1人分、名前の後に数字）。<br><br>
+      例：<br>たろう　1<br>じろう　2<br>さぶろう　3<br><br>
+      名前が一致する人は、宣材写真が登録済みなら保存した瞬間に、まだ写真がない人は写真が上がり次第、自動でその順位に並び替わります。
+    </div>
+    <textarea id="rankImportTextarea" class="rank-textarea" placeholder="たろう　1&#10;じろう　2&#10;さぶろう　3">${escapeHtml(text)}</textarea>
+    <button class="btn gold block" style="margin-top:12px;" data-action="saveRankImport">保存して反映</button>
   `;
 }
 
