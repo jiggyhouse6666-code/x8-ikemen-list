@@ -162,6 +162,10 @@ input:focus{outline:2px solid var(--gold); outline-offset:1px;}
   display:flex; align-items:center; gap:10px; padding:8px; background:var(--surface);
   border:1px solid var(--border); border-radius:12px;
 }
+.reorder-main{
+  display:flex; align-items:center; gap:10px; flex:1 1 auto; min-width:0;
+  background:none; border:none; padding:0; margin:0; text-align:left; font:inherit; color:inherit; cursor:pointer;
+}
 .reorder-thumb{width:44px; height:44px; border-radius:10px; object-fit:cover; flex:0 0 auto; border:1px solid var(--border);}
 .reorder-thumb.placeholder{
   display:flex; align-items:center; justify-content:center; color:rgba(10,8,14,0.55);
@@ -229,7 +233,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-2 - 2026-10-08';
+const BUILD_STAMP = 'otokohon-3 - 2026-10-09';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -291,6 +295,7 @@ function makeDocRef(path){
 /* ---------- helpers (ported as-is from X8 TIME CHECK) ---------- */
 function pad2(n){ return String(n).padStart(2,'0'); }
 function monthKeyOf(d){ return d.getFullYear() + '-' + pad2(d.getMonth()+1); }
+function dayKeyOf(d){ return pad2(d.getDate()); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 const STAFF_COLORS = ['#cda449','#7d8cff','#38caa0','#e5535a','#c98bd8','#5fb0d9','#e6a15c','#7ad1c9'];
 function colorFor(id){ let h=0; for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0; return STAFF_COLORS[h % STAFF_COLORS.length]; }
@@ -357,7 +362,18 @@ let staffOrder = null;           // [id,...] from otokohonOrder — custom displ
                                   // (never touches config/staff itself, so X8 TIME CHECK's own staff-select
                                   // grid keeps whatever order it already has)
 
+// Live "who's currently in" status, so the gallery can show only staff who
+// are presently clocked in (promotional photo appears on 出勤, disappears
+// on 退勤) — this is a customer-facing "who's working tonight" board, not
+// a full staff directory. One onSnapshot listener per staff member, kept
+// in sync with staffList by syncAttendanceSubscriptions().
+let attendanceStatus = {};       // {id: boolean} — true while currently clocked in today
+const attendanceUnsubs = {};     // {id: unsubscribe fn}
+let todayMonthKey = monthKeyOf(new Date());
+let todayDayKey = dayKeyOf(new Date());
+
 let view = 'gallery';            // 'gallery' | 'detail' | 'reorder'
+let detailReturnView = 'gallery'; // which view the back button from 'detail' returns to
 let activeStaffId = null;
 let pickerOpen = false;          // whether the password-gated photo picker is revealed in detail view
 let candidatePhotos = [];        // recent clock-in photos for the staff currently open in detail view
@@ -380,6 +396,9 @@ async function init(){
   document.getElementById('app').addEventListener('click', onAppClick);
   document.getElementById('toast').addEventListener('click', ()=>{ document.getElementById('toast').classList.remove('show'); });
   document.getElementById('promoPhotoFileInput').addEventListener('change', onPromoPhotoFileSelected);
+  // Catches a page left open across midnight: without this, the attendance
+  // listeners below would keep watching yesterday's (now frozen) doc forever.
+  setInterval(refreshTodayKeysAndResubscribe, 60000);
 }
 
 function subscribeStaff(){
@@ -388,11 +407,64 @@ function subscribeStaff(){
     (snap)=>{
       const data = snap.exists ? snap.data() : null;
       staffList = (data && Array.isArray(data.list)) ? data.list : [];
+      syncAttendanceSubscriptions();
       refreshResolvedGalleryPhotos();
       renderApp();
     },
     ()=>{ renderApp(); }
   );
+}
+
+// ---------- live attendance status (gates gallery visibility) ----------
+// "Currently in" means: today's non-deleted events include a 出勤 with no
+// 退勤 after it yet. Same hasInToday/hasOutToday rule X8 TIME CHECK's own
+// clock screen already uses to decide whether to show 出勤 or 退勤 next —
+// replicated here rather than reinvented, including its one-shift-a-day
+// shape (hasIn && hasOut both true just means "done for today").
+function computeInStatus(dayDoc){
+  const events = (dayDoc && Array.isArray(dayDoc.events)) ? dayDoc.events : [];
+  const live = events.filter(e=>!e.deleted);
+  const hasIn = live.some(e=>e.type==='in');
+  const hasOut = live.some(e=>e.type==='out');
+  return hasIn && !hasOut;
+}
+function subscribeAttendanceFor(staffId){
+  if(!db || attendanceUnsubs[staffId]) return;
+  const path = 'attendance/' + staffId + '_' + todayMonthKey;
+  attendanceUnsubs[staffId] = db.doc(path).onSnapshot(
+    (snap)=>{
+      const data = snap.exists ? snap.data() : null;
+      const dayDoc = data && data.days && data.days[todayDayKey];
+      attendanceStatus[staffId] = computeInStatus(dayDoc);
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+function unsubscribeAttendanceFor(staffId){
+  const un = attendanceUnsubs[staffId];
+  if(un){ try{ un(); }catch(e){} delete attendanceUnsubs[staffId]; }
+  delete attendanceStatus[staffId];
+}
+// One live listener per CURRENT staff member: adds any newly-registered
+// staff, drops anyone removed, so nothing leaks as the roster changes.
+function syncAttendanceSubscriptions(){
+  const ids = {};
+  staffList.forEach(s=>{ ids[s.id] = true; });
+  staffList.forEach(s=>subscribeAttendanceFor(s.id));
+  Object.keys(attendanceUnsubs).forEach(id=>{ if(!ids[id]) unsubscribeAttendanceFor(id); });
+}
+// Re-points every attendance listener at today's doc once the date actually
+// rolls over, instead of silently listening to a now-frozen old day forever.
+function refreshTodayKeysAndResubscribe(){
+  const now = new Date();
+  const mk = monthKeyOf(now), dk = dayKeyOf(now);
+  if(mk===todayMonthKey && dk===todayDayKey) return;
+  todayMonthKey = mk; todayDayKey = dk;
+  Object.keys(attendanceUnsubs).forEach(unsubscribeAttendanceFor);
+  attendanceStatus = {};
+  syncAttendanceSubscriptions();
+  renderApp();
 }
 
 function subscribeStaffPhotos(){
@@ -444,6 +516,14 @@ function orderedStaffList(){
   const saved = Array.isArray(staffOrder) ? staffOrder.filter(id=>byId[id]) : [];
   const missing = staffList.map(s=>s.id).filter(id=>!saved.includes(id));
   return saved.concat(missing).map(id=>byId[id]);
+}
+
+// The gallery itself only shows staff who are CURRENTLY clocked in — this
+// board is for customers to see who's working right now, not a full staff
+// list. The reorder screen still uses orderedStaffList() (everyone), since
+// relative order should be set up for staff before their first shift too.
+function visibleGalleryStaffList(){
+  return orderedStaffList().filter(s=>attendanceStatus[s.id]);
 }
 
 async function resolveInlinePhoto(photoRef){
@@ -521,14 +601,16 @@ async function loadClockinCandidates(staffId){
 }
 
 /* ---------- actions ---------- */
-function openStaffDetail(id){
+function openStaffDetail(id, returnView){
   const staff = staffList.find(s=>s.id===id);
   if(!staff) return;
   view = 'detail'; activeStaffId = id; pickerOpen = false; candidatePhotos = []; candidatesLoading = false;
+  detailReturnView = (returnView==='reorder') ? 'reorder' : 'gallery';
   renderApp();
 }
 function backToGallery(){
-  view = 'gallery'; activeStaffId = null; pickerOpen = false; candidatePhotos = [];
+  view = detailReturnView || 'gallery';
+  activeStaffId = null; pickerOpen = false; candidatePhotos = [];
   renderApp();
 }
 
@@ -659,7 +741,7 @@ function onAppClick(e){
   const el = e.target.closest('[data-action]');
   if(!el) return;
   const action = el.dataset.action;
-  if(action==='openStaffDetail') openStaffDetail(el.dataset.id);
+  if(action==='openStaffDetail') openStaffDetail(el.dataset.id, el.dataset.return);
   else if(action==='backToGallery') backToGallery();
   else if(action==='requestReorder') requestReorder();
   else if(action==='backFromReorder') backFromReorder();
@@ -712,9 +794,12 @@ function renderApp(){
 }
 
 function galleryHtml(){
-  const list = orderedStaffList();
-  if(!list.length){
+  if(!staffList.length){
     return `<div class="empty-hint">スタッフが登録されていません<br>（X8 TIME CHECKの設定タブで登録してください）</div>`;
+  }
+  const list = visibleGalleryStaffList();
+  if(!list.length){
+    return `<div class="empty-hint">只今出勤中のスタッフはいません<br>出勤すると自動でここに表示されます</div>`;
   }
   return `<div class="book-grid">${list.map(s=>bookCardHtml(s)).join('')}</div>`;
 }
@@ -790,7 +875,7 @@ function reorderHtml(){
   const list = orderedStaffList();
   if(!list.length) return `<div class="empty-hint">スタッフが登録されていません</div>`;
   return `
-    <div class="hint" style="margin-bottom:14px;">▲▼でイケメンリストに並ぶ順番を変えられます</div>
+    <div class="hint" style="margin-bottom:14px;">▲▼でイケメンリストに並ぶ順番を変えられます。名前をタップすると写真を編集できます（出勤中でなくてもOK）。</div>
     <div class="reorder-list">${list.map((s,i)=>reorderRowHtml(s, i, list.length)).join('')}</div>
   `;
 }
@@ -798,10 +883,12 @@ function reorderRowHtml(s, i, total){
   const photo = resolvedGalleryPhotos[s.id];
   return `
     <div class="reorder-row">
-      ${photo
-        ? `<img class="reorder-thumb" src="${photo}" alt="">`
-        : `<div class="reorder-thumb placeholder" style="background:${colorFor(s.id)}">${escapeHtml((s.name||'?').slice(0,1))}</div>`}
-      <div class="reorder-name">${escapeHtml(s.name)}</div>
+      <button class="reorder-main" data-action="openStaffDetail" data-id="${escapeHtml(s.id)}" data-return="reorder">
+        ${photo
+          ? `<img class="reorder-thumb" src="${photo}" alt="">`
+          : `<div class="reorder-thumb placeholder" style="background:${colorFor(s.id)}">${escapeHtml((s.name||'?').slice(0,1))}</div>`}
+        <div class="reorder-name">${escapeHtml(s.name)}</div>
+      </button>
       <div class="reorder-btns">
         <button class="btn icon-only ghost" data-action="moveStaffUp" data-id="${escapeHtml(s.id)}" ${i===0 ? 'disabled' : ''}>▲</button>
         <button class="btn icon-only ghost" data-action="moveStaffDown" data-id="${escapeHtml(s.id)}" ${i===total-1 ? 'disabled' : ''}>▼</button>
