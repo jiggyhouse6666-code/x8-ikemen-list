@@ -312,7 +312,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-14 - 2026-10-09';
+const BUILD_STAMP = 'otokohon-15 - 2026-10-10';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -459,11 +459,15 @@ let galleryHidden = {};          // {id: true} from otokohonGalleryHidden — st
 
 // A pasted-in monthly ranking ("9月ナンバー" etc.), keyed by NAME (not id)
 // so it can be prepared before someone even has a 宣材写真 yet, and still
-// matches them once they do. See handleNewlyPhotographedStaff / openRankImport.
+// matches them once they do. See applyRankToNewlyEligibleStaff / openRankImport.
 let nameRankTable = {};          // {name: rankNumber} from otokohonNameRank
-let knownPhotoStaffIds = null;   // Set of ids with a staffPhotos entry as of the last snapshot; null
-                                  // until the first snapshot. Diffed on every update to catch a 宣材写真
-                                  // newly appearing, without ever touching anyone else's position.
+let rankApplied = null;          // {id: true} from otokohonRankApplied — ids already slotted into their
+                                  // rank position (by either path below), so it's never redone and never
+                                  // undoes a manual move made since. null until the first snapshot loads.
+                                  // Saved to Firebase (not just kept in this tab's memory) specifically so
+                                  // a photo that appears while no 男本 tab is open to witness it — e.g.
+                                  // uploaded via X8 TIME CHECK overnight — still gets caught up correctly
+                                  // the next time this app is opened, instead of being silently missed.
 let rankImportDraft = null;      // live textarea contents for the ナンバー登録 screen, kept in JS state
                                   // (not just the DOM) so an unrelated Firebase update mid-paste can't
                                   // wipe out what the admin is in the middle of typing; null = show the
@@ -516,6 +520,7 @@ async function init(){
   subscribeExcludedStaff();
   subscribeGalleryHidden();
   subscribeNameRankTable();
+  subscribeRankApplied();
   renderApp();
   document.getElementById('app').addEventListener('click', onAppClick);
   document.getElementById('app').addEventListener('change', onAppChange);
@@ -610,7 +615,7 @@ function subscribeStaffPhotos(){
       const flat = {};
       for(const id in raw){ if(raw[id] && raw[id].dataUrl) flat[id] = raw[id].dataUrl; }
       staffPhotos = flat;
-      handleNewlyPhotographedStaff(flat);
+      applyRankToNewlyEligibleStaff();
       refreshResolvedGalleryPhotos();
       renderApp();
     },
@@ -623,6 +628,22 @@ function subscribeNameRankTable(){
   db.doc('otokohonNameRank').onSnapshot(
     (snap)=>{
       nameRankTable = (snap.exists && snap.data()) || {};
+      applyRankToNewlyEligibleStaff();
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
+// {id: true} map of staff already slotted into their ナンバー登録 rank
+// position — see applyRankToNewlyEligibleStaff for why this lives in
+// Firebase instead of just this tab's memory.
+function subscribeRankApplied(){
+  if(!db) return;
+  db.doc('otokohonRankApplied').onSnapshot(
+    (snap)=>{
+      rankApplied = (snap.exists && snap.data()) || {};
+      applyRankToNewlyEligibleStaff();
       renderApp();
     },
     ()=>{}
@@ -1110,7 +1131,7 @@ function insertByNameRank(order, id, rank){
 // (no entry, or ranked but no photo yet) keeps their existing relative
 // order, appended after. Called only when the admin explicitly saves the
 // ranking table — ongoing "slot in once the photo appears" is handled one
-// person at a time by handleNewlyPhotographedStaff instead, so it never
+// person at a time by applyRankToNewlyEligibleStaff instead, so it never
 // re-fights manual reordering done afterward.
 function applyNameRankOrderNow(){
   const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
@@ -1126,32 +1147,46 @@ function applyNameRankOrderNow(){
   return ranked.map(r=>r.id).concat(rest);
 }
 
-// Detects a staff member's 宣材写真 newly appearing (vs the previous
-// staffPhotos snapshot) and, if their name matches nameRankTable, slots
-// JUST that person into the matching position automatically — "名前が同じ
-// やつは写真上がったら勝手にナンバー並び替えになる様にして". Never touches
-// anyone else's position, so it can't undo reordering done by hand since.
-// The very first snapshot (page load) only records the baseline; staff who
-// already had a photo then were already accounted for whenever the table
-// was last saved, so inserting them again here would be redundant.
-function handleNewlyPhotographedStaff(flat){
-  const ids = Object.keys(flat);
-  if(knownPhotoStaffIds===null){ knownPhotoStaffIds = new Set(ids); return; }
-  const freshlyPhotographed = ids.filter(id=>!knownPhotoStaffIds.has(id));
-  knownPhotoStaffIds = new Set(ids);
-  if(!freshlyPhotographed.length) return;
+// Slots any staff member who currently has BOTH a 宣材写真 AND a
+// name-matched rank in nameRankTable into that rank position, exactly once
+// each — "名前が同じやつは写真上がったら勝手にナンバー並び替えになる様にし
+// て". Never touches anyone else's position, so it can't undo a manual
+// reorder done by hand since.
+//
+// "Already placed" (rankApplied) is saved to Firebase rather than kept only
+// in this tab's memory. That matters because the 宣材写真 itself is
+// uploaded from X8 TIME CHECK, often on a different device — if nobody
+// happened to have 男本 open at that exact moment, there was no tab around
+// to notice the photo "newly" appearing, and whichever tab opened next
+// could no longer tell "always had this photo" apart from "just got it", so
+// the person was silently skipped forever ("追記で写真入っても売上順に更新
+// する様にして"). Tracking "applied" as a persisted fact instead of a
+// same-session diff fixes that: this function is safe to call on every
+// staffPhotos/nameRankTable/otokohonRankApplied update, including the very
+// first one after load, with no "first snapshot is just a baseline" special
+// case needed any more — whoever opens the app next simply catches up
+// anyone eligible that nobody got to yet.
+function applyRankToNewlyEligibleStaff(){
+  if(rankApplied===null) return; // otokohonRankApplied hasn't loaded yet; its own first snapshot re-runs this
   const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
-  const matched = freshlyPhotographed
-    .map(id=>({ id, s: byId[id], rank: byId[id] && nameRankTable[byId[id].name] }))
-    .filter(m=>m.s && Number.isFinite(m.rank))
-    .sort((a,b)=>a.rank-b.rank); // process in rank order, in case several appear in the same snapshot
-  if(!matched.length) return;
+  const eligible = Object.keys(staffPhotos)
+    .filter(id=>byId[id] && !rankApplied[id])
+    .map(id=>({ id, s: byId[id], rank: nameRankTable[byId[id].name] }))
+    .filter(m=>Number.isFinite(m.rank))
+    .sort((a,b)=>a.rank-b.rank); // process in rank order, in case several are caught up at once
+  if(!eligible.length) return;
   let order = orderedStaffList().map(s=>s.id);
-  matched.forEach(m=>{ order = insertByNameRank(order, m.id, m.rank); });
+  eligible.forEach(m=>{ order = insertByNameRank(order, m.id, m.rank); });
   staffOrder = order;
+  const patch = {};
+  eligible.forEach(m=>{ patch[m.id] = true; });
+  rankApplied = Object.assign({}, rankApplied, patch);
   renderApp();
-  if(db) db.doc('otokohonOrder').set({ order, ts: Date.now() }).catch(()=>{});
-  showToast(matched.map(m=>m.s.name).join('、') + ' をナンバー順に自動配置しました');
+  if(db){
+    db.doc('otokohonOrder').set({ order, ts: Date.now() }).catch(()=>{});
+    db.doc('otokohonRankApplied').update(patch).catch(()=>{});
+  }
+  showToast(eligible.map(m=>m.s.name).join('、') + ' をナンバー順に自動配置しました');
 }
 
 // Formats the saved table back into pasteable "name␉rank" lines, sorted by
@@ -1197,7 +1232,16 @@ async function saveRankImport(){
   const count = Object.keys(parsed).length;
   if(!count){ showToast('「名前　数字」の行が見つかりませんでした'); return; }
   nameRankTable = parsed;
-  knownPhotoStaffIds = new Set(Object.keys(staffPhotos)); // these are all "already accounted for" as of this save
+  // Everyone who already has a photo right now is "already accounted for"
+  // as of this save — applyNameRankOrderNow() just placed them (or, if
+  // unranked, deliberately left them where they were) — so mark them
+  // applied here too, same as the order write below, so
+  // applyRankToNewlyEligibleStaff doesn't redo this for them later. Anyone
+  // without a photo yet stays un-applied, ready to be picked up
+  // automatically whenever their 宣材写真 eventually appears.
+  const accountedFor = {};
+  Object.keys(staffPhotos).forEach(id=>{ accountedFor[id] = true; });
+  rankApplied = Object.assign({}, rankApplied, accountedFor);
   const newOrder = applyNameRankOrderNow();
   staffOrder = newOrder;
   rankImportDraft = null;
@@ -1207,6 +1251,7 @@ async function saveRankImport(){
   try{
     await db.doc('otokohonNameRank').set(parsed);
     await db.doc('otokohonOrder').set({ order: newOrder, ts: Date.now() });
+    await db.doc('otokohonRankApplied').update(accountedFor);
     const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
     const appliedNow = newOrder.filter(id=>{
       const s = byId[id];
@@ -1261,6 +1306,10 @@ async function doRemoveStaffPhoto(id){
     await Promise.all([
       db.doc('staffPhotos/' + id).set(null),
       db.doc('otokohonSelection/' + id).set(null),
+      // So a later re-upload is treated as a fresh appearance again, exactly
+      // like before this photo ever existed, instead of being silently
+      // skipped as "already applied".
+      db.doc('otokohonRankApplied/' + id).set(null),
     ]);
     showToast('写真を削除しました');
   }catch(e){ showToast('削除に失敗しました'); }
