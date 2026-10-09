@@ -107,6 +107,7 @@ main{flex:1 1 auto; overflow-y:auto; padding:16px 14px calc(28px + env(safe-area
 .btn:active{transform:scale(0.97);}
 .btn.gold{background:var(--gold-grad); color:#221a05; border-color:transparent; box-shadow:0 4px 14px rgba(212,175,55,0.35);}
 .btn.ghost{background:none; border:1px solid var(--border); color:var(--text-dim); font-weight:500;}
+.btn.ghost.danger{border-color:var(--danger-soft); color:var(--danger); background:var(--danger-soft);}
 .btn.block{width:100%;}
 .btn.icon-only{padding:9px; width:38px; height:38px; display:flex; align-items:center; justify-content:center; font-size:18px;}
 .btn:disabled{opacity:0.4;}
@@ -326,7 +327,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-9 - 2026-10-09';
+const BUILD_STAMP = 'otokohon-12 - 2026-10-09';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -706,7 +707,20 @@ async function resolveInlinePhoto(photoRef){
 // clock-in capture), otherwise falls back to the 宣材写真 slot directly —
 // so a club that's never touched 男本 yet still shows whatever's already
 // uploaded in X8 TIME CHECK's settings, with zero setup required.
+//
+// staffPhotos/ and otokohonSelection/ are two separate onSnapshot
+// listeners, each calling this function on its own whenever either one
+// changes. Deleting a photo now writes to BOTH at once (see
+// doRemoveStaffPhoto), so their two listener callbacks can fire back to
+// back, and two overlapping calls here can finish in the opposite order
+// from how they started — an older call (built from since-superseded
+// selection/staffPhotos) finishing after a newer one would silently
+// overwrite the correct, fresher result with a stale one, and nothing
+// after that ever asks for another refresh to undo it. A generation
+// counter keeps only the result of whichever call started last.
+let resolvedGalleryPhotosGen = 0;
 async function refreshResolvedGalleryPhotos(){
+  const gen = ++resolvedGalleryPhotosGen;
   const ids = staffList.map(s=>s.id);
   const next = {};
   await Promise.all(ids.map(async id=>{
@@ -717,6 +731,7 @@ async function refreshResolvedGalleryPhotos(){
       next[id] = staffPhotos[id] || null;
     }
   }));
+  if(gen !== resolvedGalleryPhotosGen) return; // a newer refresh has since started; this result is stale, discard it
   resolvedGalleryPhotos = next;
   renderApp();
 }
@@ -1186,6 +1201,29 @@ async function selectClockinPhotoAsActive(staffId, cand){
   }catch(e){ showToast('変更に失敗しました'); }
 }
 
+// Clears both the uploaded 宣材写真 and whatever's currently selected
+// (staffPhoto or one specific clock-in capture), resetting this staff
+// member to the same "未設定" placeholder as someone who's never had a
+// photo at all. staffPhotos/{id} is the exact same node X8 TIME CHECK's
+// own ✕ button clears the same way (set(null) removes the key there too);
+// otokohonSelection/{id} also has to go, or a lingering clock-in selection
+// would make the old photo reappear the moment a new 宣材写真 is uploaded.
+function confirmRemoveStaffPhoto(id){
+  const staff = staffList.find(s=>s.id===id);
+  if(!staff || !db) return;
+  showConfirmModal(staff.name + 'の写真を削除して「未設定」に戻しますか？', ()=>doRemoveStaffPhoto(id));
+}
+async function doRemoveStaffPhoto(id){
+  if(!db) return;
+  try{
+    await Promise.all([
+      db.doc('staffPhotos/' + id).set(null),
+      db.doc('otokohonSelection/' + id).set(null),
+    ]);
+    showToast('写真を削除しました');
+  }catch(e){ showToast('削除に失敗しました'); }
+}
+
 // Uploads write to staffPhotos/{id} — the SAME node X8 TIME CHECK's own
 // 設定 tab manages — so a new 宣材写真 added from either app shows up in
 // both, and immediately becomes the active 男本 photo.
@@ -1208,14 +1246,26 @@ async function onPromoPhotoFileSelected(e){
   }catch(err){ showToast('写真の保存に失敗しました'); }
 }
 
-/* ---------- modal (password only) ---------- */
+/* ---------- modal (password + confirm) ---------- */
 function showPasswordModal(onSuccess){
   modalState = { kind:'password', error:'', onSuccess };
   renderModal();
 }
+// Ported from X8 TIME CHECK's own showConfirmModal — same hand-built
+// yes/no box (not window.confirm) so it matches the app's dark/gold look.
+function showConfirmModal(message, onYes){
+  modalState = { kind:'confirm', message, onYes };
+  renderModal();
+}
 function closeModal(){ modalState = null; renderModal(); }
+function modalConfirmYes(){
+  if(!modalState || modalState.kind!=='confirm') return;
+  const cb = modalState.onYes;
+  closeModal();
+  if(cb) cb();
+}
 function submitModalPassword(){
-  if(!modalState) return;
+  if(!modalState || modalState.kind!=='password') return;
   const inp = document.getElementById('modalPasswordInput');
   const val = inp ? inp.value : '';
   if(val === MANAGEMENT_PASSWORD){
@@ -1230,27 +1280,50 @@ function submitModalPassword(){
 function renderModal(){
   let el = document.getElementById('modalEl');
   if(!modalState){ if(el) el.remove(); return; }
+  // Same reasoning as the reorder-rank guard in renderApp(): if the
+  // password field already has focus, leave it be instead of rebuilding
+  // it out from under a mid-typed password. Nothing shown in this modal
+  // depends on the data that triggers a background renderApp() call —
+  // showPasswordModal/submitModalPassword/closeModal all call renderModal()
+  // directly whenever the modal itself actually has something new to show.
+  // (The confirm box has no text field, so it has nothing to protect and
+  // is always safe to rebuild.)
+  if(modalState.kind==='password' && el && document.activeElement === document.getElementById('modalPasswordInput')){
+    return;
+  }
   let justCreated = false;
   if(!el){
     el = document.createElement('div'); el.id = 'modalEl'; el.className = 'modal-overlay';
     document.getElementById('app').appendChild(el);
     justCreated = true;
   }
-  el.innerHTML = `
-    <div class="modal-box">
-      <div class="modal-message">パスワードを入力してください</div>
-      <input type="password" inputmode="numeric" autocomplete="off" class="modal-input" id="modalPasswordInput">
-      ${modalState.error ? `<div class="modal-error">${escapeHtml(modalState.error)}</div>` : ''}
-      <div class="modal-actions">
-        <button class="btn ghost block" data-action="modalCancel">キャンセル</button>
-        <button class="btn gold block" data-action="modalPasswordSubmit">確認</button>
+  if(modalState.kind==='confirm'){
+    el.innerHTML = `
+      <div class="modal-box">
+        <div class="modal-message">${escapeHtml(modalState.message)}</div>
+        <div class="modal-actions">
+          <button class="btn ghost block" data-action="modalCancel">キャンセル</button>
+          <button class="btn gold block" data-action="modalConfirmYes">OK</button>
+        </div>
       </div>
-    </div>
-  `;
-  const inp = document.getElementById('modalPasswordInput');
-  if(inp){
-    inp.focus();
-    inp.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') submitModalPassword(); });
+    `;
+  } else {
+    el.innerHTML = `
+      <div class="modal-box">
+        <div class="modal-message">パスワードを入力してください</div>
+        <input type="password" inputmode="numeric" autocomplete="off" class="modal-input" id="modalPasswordInput">
+        ${modalState.error ? `<div class="modal-error">${escapeHtml(modalState.error)}</div>` : ''}
+        <div class="modal-actions">
+          <button class="btn ghost block" data-action="modalCancel">キャンセル</button>
+          <button class="btn gold block" data-action="modalPasswordSubmit">確認</button>
+        </div>
+      </div>
+    `;
+    const inp = document.getElementById('modalPasswordInput');
+    if(inp){
+      inp.focus();
+      inp.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') submitModalPassword(); });
+    }
   }
   if(justCreated) el._openedAt = Date.now();
   // A long-press that unlocks gallery reordering opens this same modal on
@@ -1287,8 +1360,10 @@ function onAppClick(e){
     if(c) selectClockinPhotoAsActive(el.dataset.id, c);
   }
   else if(action==='pickPromoPhotoFile') pickPromoPhotoFile();
+  else if(action==='removeStaffPhoto') confirmRemoveStaffPhoto(el.dataset.id);
   else if(action==='modalCancel') closeModal();
   else if(action==='modalPasswordSubmit') submitModalPassword();
+  else if(action==='modalConfirmYes') modalConfirmYes();
 }
 
 // The reorder screen's rank input (順位) is a text field, not a button, so
@@ -1321,6 +1396,18 @@ function onAppInput(e){
 
 /* ---------- render ---------- */
 function renderApp(){
+  // Don't rebuild the 並び替え screen while the admin has a rank number
+  // field focused mid-edit. Attendance/photo snapshots can land at any
+  // moment — staff clock in/out all night — and each one calls renderApp();
+  // replacing main.innerHTML while someone is mid-keystroke would reset
+  // the field to its old value and drop focus, making a typed number
+  // look like it does nothing. Whatever triggered this render already
+  // updated the underlying state; setStaffPosition() re-renders once the
+  // admin commits (blur/Enter), so nothing is lost by waiting.
+  const activeEl = document.activeElement;
+  if(view==='reorder' && activeEl && activeEl.classList && activeEl.classList.contains('reorder-rank')){
+    return;
+  }
   const header = document.getElementById('headerInner');
   const main = document.getElementById('main');
   if(view==='detail'){
@@ -1465,6 +1552,9 @@ function pickerHtml(staff){
           <div class="upload-plus">＋</div><div class="upload-label">${promo ? '差し替え' : 'アップロード'}</div>
         </button>
       </div>
+      ${resolvedGalleryPhotos[staff.id] ? `
+        <button class="btn ghost danger block" style="margin-top:10px;" data-action="removeStaffPhoto" data-id="${escapeHtml(staff.id)}">写真を削除して未設定に戻す</button>
+      ` : ''}
 
       <div class="section-title">出勤時の写真から選ぶ</div>
       ${candidatesLoading
