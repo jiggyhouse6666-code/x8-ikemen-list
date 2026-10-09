@@ -327,7 +327,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-12 - 2026-10-09';
+const BUILD_STAMP = 'otokohon-13 - 2026-10-09';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -462,6 +462,16 @@ let excludedStaff = {};          // {id: true} from otokohonExcluded — staff f
                                   // Stored separately from config/staff, same as otokohonOrder — X8 TIME
                                   // CHECK itself is never touched or made aware of this flag.
 
+let galleryHidden = {};          // {id: true} from otokohonGalleryHidden — staff clocked in with NO
+                                  // photo yet (e.g. a new host's first shift, before any 宣材写真 or
+                                  // clock-in photo exists for them), manually hidden from THIS app's
+                                  // gallery via the picker screen. Unlike excludedStaff/運営 (a
+                                  // permanent "not customer facing" flag the admin sets and unsets by
+                                  // hand), this one is self-correcting: the moment ANY photo becomes
+                                  // available for that staff member, it's cleared automatically — see
+                                  // clearGalleryHiddenWherePhotoAppeared(). Stored separately, same
+                                  // pattern as otokohonOrder/otokohonExcluded.
+
 // A pasted-in monthly ranking ("9月ナンバー" etc.), keyed by NAME (not id)
 // so it can be prepared before someone even has a 宣材写真 yet, and still
 // matches them once they do. See handleNewlyPhotographedStaff / openRankImport.
@@ -519,6 +529,7 @@ async function init(){
   subscribeSelection();
   subscribeStaffOrder();
   subscribeExcludedStaff();
+  subscribeGalleryHidden();
   subscribeNameRankTable();
   renderApp();
   document.getElementById('app').addEventListener('click', onAppClick);
@@ -668,6 +679,17 @@ function subscribeExcludedStaff(){
   );
 }
 
+function subscribeGalleryHidden(){
+  if(!db) return;
+  db.doc('otokohonGalleryHidden').onSnapshot(
+    (snap)=>{
+      galleryHidden = (snap.exists && snap.data()) || {};
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
 // The display order this app shows (gallery grid + reorder screen): the
 // saved order, limited to staff who still exist, with any staff NOT yet in
 // it (brand new, or before anyone has ever reordered) appended at the end
@@ -683,11 +705,13 @@ function orderedStaffList(){
 // The gallery itself only shows staff who are CURRENTLY clocked in — this
 // board is for customers to see who's working right now, not a full staff
 // list. 運営 (excludedStaff) never appear here even while clocked in with a
-// photo. The reorder screen still uses orderedStaffList() (everyone,
-// 運営 included), since relative order — and the 運営 toggle itself — need
-// to be set up for staff before their first shift too.
+// photo, and neither does anyone manually hidden for having no photo yet
+// (galleryHidden). The reorder screen still uses orderedStaffList()
+// (everyone, both kinds of hidden staff included), since relative order —
+// and the 運営/非表示 toggles themselves — need to be set up for staff
+// before their first shift too.
 function visibleGalleryStaffList(){
-  return orderedStaffList().filter(s=>attendanceStatus[s.id] && !excludedStaff[s.id]);
+  return orderedStaffList().filter(s=>attendanceStatus[s.id] && !excludedStaff[s.id] && !galleryHidden[s.id]);
 }
 
 async function resolveInlinePhoto(photoRef){
@@ -734,6 +758,24 @@ async function refreshResolvedGalleryPhotos(){
   if(gen !== resolvedGalleryPhotosGen) return; // a newer refresh has since started; this result is stale, discard it
   resolvedGalleryPhotos = next;
   renderApp();
+  clearGalleryHiddenWherePhotoAppeared(next);
+}
+
+// A staff member hidden via galleryHidden was hidden ONLY because they had
+// no photo at the time. The moment a photo shows up for them (宣材写真
+// registered, or a clock-in photo resolved above), that reason is gone, so
+// clear the flag automatically rather than leaving them stuck hidden until
+// someone remembers to go flip it back. Never touches excludedStaff/運営 —
+// that one is a deliberate, permanent admin choice unrelated to photos.
+async function clearGalleryHiddenWherePhotoAppeared(resolved){
+  const toClear = Object.keys(galleryHidden).filter(id=>resolved[id]);
+  if(!toClear.length || !db) return;
+  const next = Object.assign({}, galleryHidden);
+  toClear.forEach(id=>{ delete next[id]; });
+  galleryHidden = next;
+  renderApp();
+  try{ await db.doc('otokohonGalleryHidden').set(next); }
+  catch(e){ /* best-effort — worst case it's still hidden and the next refresh tries again */ }
 }
 
 /* ---------- clock-in photo candidates ---------- */
@@ -1035,6 +1077,21 @@ async function toggleOpsStaff(id){
   if(!db) return;
   try{ await db.doc('otokohonExcluded').set(next); }
   catch(e){ showToast('運営設定の保存に失敗しました'); }
+}
+
+// Manually hides/un-hides a staff member who currently has no photo from
+// the gallery (see the galleryHidden comment up top for why this is kept
+// separate from 運営/excludedStaff). No confirm step — same as 運営, it's
+// instantly reversible by tapping again, and it also clears itself
+// automatically once a photo appears (clearGalleryHiddenWherePhotoAppeared).
+async function toggleGalleryHidden(id){
+  const next = Object.assign({}, galleryHidden);
+  if(next[id]) delete next[id]; else next[id] = true;
+  galleryHidden = next;
+  renderApp();
+  if(!db) return;
+  try{ await db.doc('otokohonGalleryHidden').set(next); }
+  catch(e){ showToast('設定の保存に失敗しました'); }
 }
 
 /* ---------- monthly name-rank import (「9月ナンバー」など) ---------- */
@@ -1350,6 +1407,7 @@ function onAppClick(e){
   else if(action==='moveStaffUp') moveStaff(el.dataset.id, -1);
   else if(action==='moveStaffDown') moveStaff(el.dataset.id, 1);
   else if(action==='toggleOpsStaff') toggleOpsStaff(el.dataset.id);
+  else if(action==='toggleGalleryHidden') toggleGalleryHidden(el.dataset.id);
   else if(action==='openRankImport') openRankImport();
   else if(action==='backFromRankImport') backFromRankImport();
   else if(action==='saveRankImport') saveRankImport();
@@ -1538,6 +1596,8 @@ function pickerHtml(staff){
   const sel = selection[staff.id];
   const isStaffPhotoActive = !sel || sel.kind==='staffPhoto';
   const promo = staffPhotos[staff.id];
+  const hasPhoto = !!resolvedGalleryPhotos[staff.id];
+  const hidden = !!galleryHidden[staff.id];
   return `
     <div class="picker">
       <div class="section-title">宣材写真</div>
@@ -1552,9 +1612,11 @@ function pickerHtml(staff){
           <div class="upload-plus">＋</div><div class="upload-label">${promo ? '差し替え' : 'アップロード'}</div>
         </button>
       </div>
-      ${resolvedGalleryPhotos[staff.id] ? `
+      ${hasPhoto ? `
         <button class="btn ghost danger block" style="margin-top:10px;" data-action="removeStaffPhoto" data-id="${escapeHtml(staff.id)}">写真を削除して未設定に戻す</button>
-      ` : ''}
+      ` : `
+        <button class="btn ghost danger block" style="margin-top:10px;" data-action="toggleGalleryHidden" data-id="${escapeHtml(staff.id)}">${hidden ? '✓ IKEMEN LISTから除外中（タップで戻す／写真が付けば自動で戻ります）' : '写真が無いのでIKEMEN LISTから消す'}</button>
+      `}
 
       <div class="section-title">出勤時の写真から選ぶ</div>
       ${candidatesLoading
@@ -1581,13 +1643,14 @@ function reorderHtml(){
   const list = orderedStaffList();
   if(!list.length) return `<div class="empty-hint">スタッフが登録されていません</div>`;
   return `
-    <div class="hint" style="margin-bottom:14px;">数字を直接入力すると、その順位に移動します。右上の「#」から売上ナンバーをまとめて登録すると、名前が一致する人は写真が上がり次第、自動でその順位になります。▲▼でも1つずつ動かせます。「運営」ボタンでIKEMEN LISTに出さない人を設定できます。名前をタップすると写真を編集できます（出勤中でなくてもOK）。</div>
+    <div class="hint" style="margin-bottom:14px;">数字を直接入力すると、その順位に移動します。右上の「#」から売上ナンバーをまとめて登録すると、名前が一致する人は写真が上がり次第、自動でその順位になります。▲▼でも1つずつ動かせます。「運営」ボタンでIKEMEN LISTに出さない人を設定できます。名前をタップすると写真を編集できます（出勤中でなくてもOK）。写真が無いまま出勤した人は、その編集画面から一時的にIKEMEN LISTから消せます（写真が付くと自動で戻ります）。</div>
     <div class="reorder-list">${list.map((s,i)=>reorderRowHtml(s, i, list.length)).join('')}</div>
   `;
 }
 function reorderRowHtml(s, i, total){
   const photo = resolvedGalleryPhotos[s.id];
   const excluded = !!excludedStaff[s.id];
+  const hidden = !!galleryHidden[s.id];
   return `
     <div class="reorder-row${excluded ? ' excluded' : ''}">
       <input class="reorder-rank" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
@@ -1598,7 +1661,7 @@ function reorderRowHtml(s, i, total){
           : `<div class="reorder-thumb placeholder" style="background:${colorFor(s.id)}">${escapeHtml((s.name||'?').slice(0,1))}</div>`}
         <div class="reorder-text">
           <div class="reorder-name">${escapeHtml(s.name)}</div>
-          ${excluded ? `<div class="reorder-sub">運営（IKEMEN LISTに非表示）</div>` : ''}
+          ${excluded ? `<div class="reorder-sub">運営（IKEMEN LISTに非表示）</div>` : (hidden ? `<div class="reorder-sub">写真待ちのため非表示中</div>` : '')}
         </div>
       </button>
       <div class="reorder-btns">
