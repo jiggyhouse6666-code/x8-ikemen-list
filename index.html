@@ -312,7 +312,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-15 - 2026-10-10';
+const BUILD_STAMP = 'otokohon-17 - 2026-10-10';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -478,10 +478,22 @@ let rankImportDraft = null;      // live textarea contents for the ナンバー�
 // on 退勤) — this is a customer-facing "who's working tonight" board, not
 // a full staff directory. One onSnapshot listener per staff member, kept
 // in sync with staffList by syncAttendanceSubscriptions().
-let attendanceStatus = {};       // {id: boolean} — true while currently clocked in today
+let attendanceStatus = {};       // {id: boolean} — true while currently clocked in (today, OR a
+                                  // shift from yesterday that's still running past midnight)
 const attendanceUnsubs = {};     // {id: unsubscribe fn}
-let todayMonthKey = monthKeyOf(new Date());
-let todayDayKey = dayKeyOf(new Date());
+const attendanceRawByMonth = {}; // {id: {monthKey: raw attendance/{id}_{monthKey} doc or null}} —
+                                  // cached per staff so today's/yesterday's day bucket can both be
+                                  // re-read instantly whenever the keys below roll over, without
+                                  // waiting on a fresh network round-trip.
+let todayMonthKey = monthKeyOf(businessDayOf(new Date()));
+let todayDayKey = dayKeyOf(businessDayOf(new Date()));
+let yesterdayMonthKey, yesterdayDayKey; // see recomputeYesterdayKeys() — a shift that starts before
+                                  // the business day rolls over and is still going has its 出勤 filed
+                                  // under YESTERDAY's day bucket with no 退勤 after it yet, so
+                                  // "currently in" (below) always checks both buckets, never just
+                                  // today's alone — on top of businessDayOf's own 25時 cutover, this is
+                                  // what keeps a shift showing correctly no matter how late it runs.
+recomputeYesterdayKeys();
 
 let view = 'gallery';            // 'gallery' | 'detail' | 'reorder'
 let detailReturnView = 'gallery'; // which view the back button from 'detail' returns to
@@ -556,35 +568,72 @@ function subscribeStaff(){
 }
 
 // ---------- live attendance status (gates gallery visibility) ----------
-// "Currently in" means: today's non-deleted events include a 出勤 with no
-// 退勤 after it yet. Same hasInToday/hasOutToday rule X8 TIME CHECK's own
-// clock screen already uses to decide whether to show 出勤 or 退勤 next —
-// replicated here rather than reinvented, including its one-shift-a-day
-// shape (hasIn && hasOut both true just means "done for today").
-function computeInStatus(dayDoc){
-  const events = (dayDoc && Array.isArray(dayDoc.events)) ? dayDoc.events : [];
-  const live = events.filter(e=>!e.deleted);
-  const hasIn = live.some(e=>e.type==='in');
-  const hasOut = live.some(e=>e.type==='out');
-  return hasIn && !hasOut;
+// A day-key alone isn't enough, even with businessDayOf's 25時 cutover: a
+// host clocked in at 23:50 has that 出勤 filed under YESTERDAY's (calendar)
+// day bucket, and a long shift can still have no 退勤 well after this app's
+// own "today" has rolled over at 1am — so "currently in" looks at today's
+// AND yesterday's events together and asks which is the most recent live
+// one, not just scans today's bucket alone. This is the same
+// hasInToday/hasOutToday idea X8 TIME CHECK's own clock screen uses to
+// decide whether to show 出勤 or 退勤 next, just widened to two buckets.
+function computeInStatus(dayDocs){
+  let latest = null;
+  dayDocs.forEach(dayDoc=>{
+    const events = (dayDoc && Array.isArray(dayDoc.events)) ? dayDoc.events : [];
+    events.forEach(e=>{
+      if(e.deleted) return;
+      if(!latest || (e.ts||0) > (latest.ts||0)) latest = e;
+    });
+  });
+  return !!latest && latest.type==='in';
+}
+// A host club's night doesn't end at 24:00 — 25時 (1am) is the
+// conventional cutover, matching how the venue itself talks about "today"
+// deep into a shift: between 0:00 and 0:59 it's still last night. Until 1am
+// local time, this returns yesterday's date; from 1am on, it returns today.
+function businessDayOf(d){
+  const b = new Date(d);
+  if(b.getHours() < 1) b.setDate(b.getDate() - 1);
+  return b;
+}
+// Kept one business day behind todayMonthKey/todayDayKey — recomputed
+// whenever those roll over. Tracked as its own month+day pair (not just
+// "today's day number minus one") since the two can land in different
+// months (the 1st of the month, 一日's yesterday is last month).
+function recomputeYesterdayKeys(){
+  const y = businessDayOf(new Date());
+  y.setDate(y.getDate() - 1);
+  yesterdayMonthKey = monthKeyOf(y);
+  yesterdayDayKey = dayKeyOf(y);
 }
 function subscribeAttendanceFor(staffId){
   if(!db || attendanceUnsubs[staffId]) return;
-  const path = 'attendance/' + staffId + '_' + todayMonthKey;
-  attendanceUnsubs[staffId] = db.doc(path).onSnapshot(
-    (snap)=>{
-      const data = snap.exists ? snap.data() : null;
-      const dayDoc = data && data.days && data.days[todayDayKey];
-      attendanceStatus[staffId] = computeInStatus(dayDoc);
-      renderApp();
-    },
-    ()=>{}
-  );
+  const monthKeys = Array.from(new Set([todayMonthKey, yesterdayMonthKey]));
+  attendanceRawByMonth[staffId] = {};
+  const unsubs = monthKeys.map(monthKey=>{
+    const path = 'attendance/' + staffId + '_' + monthKey;
+    return db.doc(path).onSnapshot(
+      (snap)=>{
+        attendanceRawByMonth[staffId][monthKey] = snap.exists ? snap.data() : null;
+        recomputeAttendanceStatus(staffId);
+      },
+      ()=>{}
+    );
+  });
+  attendanceUnsubs[staffId] = ()=>{ unsubs.forEach(u=>{ try{ u(); }catch(e){} }); };
+}
+function recomputeAttendanceStatus(staffId){
+  const raw = attendanceRawByMonth[staffId] || {};
+  const todayDoc = raw[todayMonthKey] && raw[todayMonthKey].days && raw[todayMonthKey].days[todayDayKey];
+  const yesterdayDoc = raw[yesterdayMonthKey] && raw[yesterdayMonthKey].days && raw[yesterdayMonthKey].days[yesterdayDayKey];
+  attendanceStatus[staffId] = computeInStatus([yesterdayDoc, todayDoc]);
+  renderApp();
 }
 function unsubscribeAttendanceFor(staffId){
   const un = attendanceUnsubs[staffId];
   if(un){ try{ un(); }catch(e){} delete attendanceUnsubs[staffId]; }
   delete attendanceStatus[staffId];
+  delete attendanceRawByMonth[staffId];
 }
 // One live listener per CURRENT staff member: adds any newly-registered
 // staff, drops anyone removed, so nothing leaks as the roster changes.
@@ -594,13 +643,15 @@ function syncAttendanceSubscriptions(){
   staffList.forEach(s=>subscribeAttendanceFor(s.id));
   Object.keys(attendanceUnsubs).forEach(id=>{ if(!ids[id]) unsubscribeAttendanceFor(id); });
 }
-// Re-points every attendance listener at today's doc once the date actually
-// rolls over, instead of silently listening to a now-frozen old day forever.
+// Re-points every attendance listener at today's (and yesterday's) doc once
+// the BUSINESS day actually rolls over (see businessDayOf — 25時/1am, not
+// 24:00), instead of silently listening to a now-frozen old day forever.
 function refreshTodayKeysAndResubscribe(){
-  const now = new Date();
-  const mk = monthKeyOf(now), dk = dayKeyOf(now);
+  const bd = businessDayOf(new Date());
+  const mk = monthKeyOf(bd), dk = dayKeyOf(bd);
   if(mk===todayMonthKey && dk===todayDayKey) return;
   todayMonthKey = mk; todayDayKey = dk;
+  recomputeYesterdayKeys();
   Object.keys(attendanceUnsubs).forEach(unsubscribeAttendanceFor);
   attendanceStatus = {};
   syncAttendanceSubscriptions();
