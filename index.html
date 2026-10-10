@@ -312,7 +312,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-17 - 2026-10-10';
+const BUILD_STAMP = 'otokohon-18 - 2026-10-10';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -561,6 +561,17 @@ function subscribeStaff(){
       staffList = (data && Array.isArray(data.list)) ? data.list : [];
       syncAttendanceSubscriptions();
       refreshResolvedGalleryPhotos();
+      // config/staff, staffPhotos, otokohonNameRank and otokohonRankApplied
+      // are four independent Firebase listeners with no guaranteed arrival
+      // order — applyRankToNewlyEligibleStaff() needs all four loaded
+      // (it keys staffPhotos entries by staff id via staffList) and is
+      // already re-run whenever the other three change, but without this
+      // call, a load where this one happens to arrive LAST would leave
+      // staffList empty on every one of those earlier runs, silently
+      // skipping everyone (byId[id] fails for all of them) with nothing to
+      // ever retry — exactly the "新しく写真が増えた人が売上順の位置に来な
+      // い" symptom, intermittently, depending on network timing alone.
+      applyRankToNewlyEligibleStaff();
       renderApp();
     },
     ()=>{ renderApp(); }
