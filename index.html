@@ -118,6 +118,7 @@ input:focus, textarea:focus{outline:2px solid var(--gold); outline-offset:1px;}
 
 /* ===== gallery (本棚) ===== */
 .book-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+.book-grid-span{grid-column:1/-1;}
 .book-card{
   position:relative; aspect-ratio:3/4; border-radius:var(--radius); overflow:hidden;
   border:1px solid var(--border); background:var(--surface); padding:0; display:block; width:100%;
@@ -129,6 +130,7 @@ input:focus, textarea:focus{outline:2px solid var(--gold); outline-offset:1px;}
 }
 .book-card:active{transform:scale(0.97);}
 .book-photo{width:100%; height:100%; object-fit:cover; display:block; -webkit-user-drag:none; user-select:none;}
+.book-photo.contain{object-fit:contain; background:var(--surface);}
 .book-photo.placeholder{
   display:flex; align-items:center; justify-content:center; color:rgba(10,8,14,0.55);
   font-family:'Oswald',sans-serif; font-weight:700; font-size:34px;
@@ -159,6 +161,7 @@ input:focus, textarea:focus{outline:2px solid var(--gold); outline-offset:1px;}
 main.full-bleed{padding:0; overflow:hidden;}
 .viewer{position:relative; width:100%; height:100%; background:#0a080e; touch-action:pan-y;}
 .viewer-photo{width:100%; height:100%; object-fit:cover; display:block; animation:viewerFade .18s ease; -webkit-user-drag:none; user-select:none;}
+.viewer-photo.contain{object-fit:contain; background:#0a080e;}
 .viewer-photo.placeholder{
   display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.3);
   font-family:'Oswald',sans-serif; font-weight:700; font-size:120px;
@@ -237,6 +240,7 @@ main.full-bleed{padding:0; overflow:hidden;}
 .reorder-text{flex:1 1 auto; min-width:0;}
 .reorder-name{font-size:14px; font-weight:700; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .reorder-sub{font-size:10.5px; color:var(--text-faint); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.reorder-sub.rank-mismatch{color:var(--danger);}
 .reorder-btns{display:flex; flex-direction:column; gap:6px; flex:0 0 auto;}
 .reorder-btns-row{display:flex; gap:6px;}
 .reorder-btns .btn{width:34px; height:34px; padding:0; font-size:13px;}
@@ -312,7 +316,7 @@ import {
   onValue as fbOnValue
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-18 - 2026-10-10';
+const BUILD_STAMP = 'otokohon-19 - 2026-10-10';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -433,6 +437,9 @@ async function makeCompressedDataUrl(fileOrBlob, attempts, capChars){
 /* ---------- state ---------- */
 let staffList = [];              // [{id,name}] from config/staff (current roster only)
 let staffPhotos = {};            // {id: dataUrl} from staffPhotos/ (shared with X8 TIME CHECK)
+let staffPhotosTs = {};          // {id: ts} parallel map of when each 宣材写真 was last set — lets a
+                                  // clock-in selection older than the CURRENT 宣材写真 be treated as
+                                  // stale instead of shown forever (see isPromoPhotoActive)
 let selection = {};              // {id: {kind:'staffPhoto'} | {kind:'clockin', monthKey, dayKey, eid, photo}} from otokohonSelection/
 let resolvedGalleryPhotos = {};  // {id: dataUrl|null} — selection resolved down to an actual displayable photo
 const inlinePhotoCache = {};     // photos/{id} doc id -> dataUrl, avoids refetching the same clock-in photo repeatedly
@@ -674,9 +681,10 @@ function subscribeStaffPhotos(){
   db.doc('staffPhotos').onSnapshot(
     (snap)=>{
       const raw = (snap.exists && snap.data()) || {};
-      const flat = {};
-      for(const id in raw){ if(raw[id] && raw[id].dataUrl) flat[id] = raw[id].dataUrl; }
+      const flat = {}; const flatTs = {};
+      for(const id in raw){ if(raw[id] && raw[id].dataUrl){ flat[id] = raw[id].dataUrl; flatTs[id] = raw[id].ts || 0; } }
       staffPhotos = flat;
+      staffPhotosTs = flatTs;
       applyRankToNewlyEligibleStaff();
       refreshResolvedGalleryPhotos();
       renderApp();
@@ -690,6 +698,7 @@ function subscribeNameRankTable(){
   db.doc('otokohonNameRank').onSnapshot(
     (snap)=>{
       nameRankTable = (snap.exists && snap.data()) || {};
+      rebuildNameRankTableNormalized();
       applyRankToNewlyEligibleStaff();
       renderApp();
     },
@@ -794,6 +803,25 @@ async function resolveInlinePhoto(photoRef){
   }catch(e){ return null; }
 }
 
+// True when this staff member's 宣材写真 is what should be shown, either
+// because no clock-in capture was ever pinned, or because one WAS pinned
+// but the 宣材写真 has since been set (or replaced) more recently than
+// that pin — i.e. a newer promotional photo has arrived since, so it wins
+// automatically, on live devices and on a cold load alike ("宣材写真は追
+// 加すれば選べる様にしたい"; a clock-in ("顔") selection is explicitly not
+// worth keeping fresh the other way). Purely a timestamp comparison
+// against data already stored (staffPhotos' own ts vs the selection's own
+// ts), so there's no extra "have I seen this before" state to get wrong —
+// same idea as why otokohonRankApplied is a persisted fact rather than a
+// per-tab memory. Shared by the resolved-photo logic and the picker's own
+// "✓" highlight so the two always agree on what's actually being shown.
+function isPromoPhotoActive(staffId){
+  const sel = selection[staffId];
+  if(!sel || sel.kind==='staffPhoto') return true;
+  if(sel.kind==='clockin') return (sel.ts||0) < (staffPhotosTs[staffId]||0);
+  return true;
+}
+
 // Resolves each staff member's CURRENTLY DISPLAYED photo: their selection
 // pointer if one has been set (either the 宣材写真 slot or a specific
 // clock-in capture), otherwise falls back to the 宣材写真 slot directly —
@@ -817,7 +845,7 @@ async function refreshResolvedGalleryPhotos(){
   const next = {};
   await Promise.all(ids.map(async id=>{
     const sel = selection[id];
-    if(sel && sel.kind==='clockin' && sel.photo){
+    if(sel && sel.kind==='clockin' && sel.photo && !isPromoPhotoActive(id)){
       next[id] = await resolveInlinePhoto(sel.photo);
     } else {
       next[id] = staffPhotos[id] || null;
@@ -889,9 +917,19 @@ async function loadClockinCandidates(staffId){
 }
 
 /* ---------- actions ---------- */
+// A "detail" item is either a real staff member or one of the fixed
+// LEAD_SLIDES (QR code / menu pages) — looked up by id through this one
+// function everywhere the app needs to go from an id to "what is this",
+// so a lead slide's id (never a real Firebase-generated staff id, by
+// construction — see LEAD_SLIDES) is recognized before falling through to
+// the staff roster.
+function findDetailItem(id){
+  const lead = LEAD_SLIDES.find(l=>l.id===id);
+  if(lead) return lead;
+  return staffList.find(s=>s.id===id) || null;
+}
 function openStaffDetail(id, returnView){
-  const staff = staffList.find(s=>s.id===id);
-  if(!staff) return;
+  if(!findDetailItem(id)) return;
   view = 'detail'; activeStaffId = id; pickerOpen = false; candidatePhotos = []; candidatesLoading = false;
   detailReturnView = (returnView==='reorder') ? 'reorder' : 'gallery';
   renderApp();
@@ -903,12 +941,13 @@ function backToGallery(){
 }
 
 // The list the full-screen viewer swipes through — mirrors wherever
-// "detail" was opened FROM: the live (attendance-filtered) gallery when
-// opened from a 本棚 card, or the full roster when opened from 並び替え
-// (so admins can browse everyone's photo there too, same staff set that
-// screen already lists).
+// "detail" was opened FROM: the live (attendance-filtered) gallery, LED by
+// the fixed QR/menu slides, when opened from a 本棚 card; or the full
+// staff roster alone (no lead slides — there's nothing to manage about a
+// fixed image) when opened from 並び替え, so admins can still browse
+// everyone's photo there too, same staff set that screen already lists.
 function detailNavList(){
-  return detailReturnView==='reorder' ? orderedStaffList() : visibleGalleryStaffList();
+  return detailReturnView==='reorder' ? orderedStaffList() : LEAD_SLIDES.concat(visibleGalleryStaffList());
 }
 // All pointer-driven gestures in the app funnel through these three
 // handlers (attached once to #main in init()), branching on whatever
@@ -1164,6 +1203,32 @@ async function toggleGalleryHidden(id){
 
 /* ---------- monthly name-rank import (「9月ナンバー」など) ---------- */
 
+// Matches staff names against the pasted ナンバー表 a little more loosely
+// than exact string equality: trims stray leading/trailing spaces and
+// folds full-width digits/letters/spaces to half-width (Unicode NFKC), so
+// a name retyped with an extra space or typed on an IME that slipped in a
+// zenkaku character still matches — without ever treating two genuinely
+// different names (different kanji, hiragana vs katakana) as the same
+// person; NFKC never touches that distinction. An un-matched name is
+// otherwise invisible: that person just never gets picked up by the
+// automatic ナンバー順 placement, with nothing in the UI to explain why
+// (see the "ナンバー表に未登録" hint in reorderRowHtml, which surfaces
+// exactly this case to the admin instead of leaving it silent).
+function normalizeNameForMatch(name){
+  return String(name||'').normalize('NFKC').trim().replace(/\s+/g, ' ');
+}
+let nameRankTableNormalized = {}; // normalized-name -> rank, rebuilt whenever nameRankTable changes
+function rebuildNameRankTableNormalized(){
+  const next = {};
+  Object.keys(nameRankTable||{}).forEach(name=>{
+    next[normalizeNameForMatch(name)] = nameRankTable[name];
+  });
+  nameRankTableNormalized = next;
+}
+function rankForStaffName(name){
+  return nameRankTableNormalized[normalizeNameForMatch(name)];
+}
+
 // Inserts `id` (whose stored rank is `rank`) right before the first OTHER
 // ranked-and-photographed staff member with an equal-or-larger rank number
 // — i.e. in order relative to its ranked peers only. Unranked people (or
@@ -1179,7 +1244,7 @@ function insertByNameRank(order, id, rank){
   let insertAt = withoutId.length;
   for(let i=0;i<withoutId.length;i++){
     const other = byId[withoutId[i]];
-    const otherRank = other && nameRankTable[other.name];
+    const otherRank = other && rankForStaffName(other.name);
     const otherHasPhoto = other && !!staffPhotos[other.id];
     if(other && Number.isFinite(otherRank) && otherHasPhoto && otherRank>=rank){ insertAt = i; break; }
   }
@@ -1201,7 +1266,7 @@ function applyNameRankOrderNow(){
   const ranked = [], rest = [];
   current.forEach(id=>{
     const s = byId[id];
-    const rank = s && nameRankTable[s.name];
+    const rank = s && rankForStaffName(s.name);
     if(s && Number.isFinite(rank) && staffPhotos[id]) ranked.push({ id, rank });
     else rest.push(id);
   });
@@ -1233,7 +1298,7 @@ function applyRankToNewlyEligibleStaff(){
   const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
   const eligible = Object.keys(staffPhotos)
     .filter(id=>byId[id] && !rankApplied[id])
-    .map(id=>({ id, s: byId[id], rank: nameRankTable[byId[id].name] }))
+    .map(id=>({ id, s: byId[id], rank: rankForStaffName(byId[id].name) }))
     .filter(m=>Number.isFinite(m.rank))
     .sort((a,b)=>a.rank-b.rank); // process in rank order, in case several are caught up at once
   if(!eligible.length) return;
@@ -1294,6 +1359,7 @@ async function saveRankImport(){
   const count = Object.keys(parsed).length;
   if(!count){ showToast('「名前　数字」の行が見つかりませんでした'); return; }
   nameRankTable = parsed;
+  rebuildNameRankTableNormalized();
   // Everyone who already has a photo right now is "already accounted for"
   // as of this save — applyNameRankOrderNow() just placed them (or, if
   // unranked, deliberately left them where they were) — so mark them
@@ -1565,14 +1631,14 @@ function renderApp(){
   const header = document.getElementById('headerInner');
   const main = document.getElementById('main');
   if(view==='detail'){
-    const staff = staffList.find(s=>s.id===activeStaffId);
+    const item = findDetailItem(activeStaffId);
     header.innerHTML = `
       <button class="btn icon-only ghost" data-action="backToGallery">‹</button>
-      <div class="header-title-center">${escapeHtml(staff ? staff.name : '')}</div>
+      <div class="header-title-center">${escapeHtml(item && !item.isLead ? item.name : '')}</div>
       <div class="header-spacer"></div>
     `;
     main.classList.toggle('full-bleed', !pickerOpen);
-    main.innerHTML = detailHtml(staff);
+    main.innerHTML = detailHtml(item);
   } else if(view==='reorder'){
     main.classList.remove('full-bleed');
     header.innerHTML = `
@@ -1610,10 +1676,18 @@ function renderApp(){
 }
 
 function galleryHtml(){
+  // LEAD_SLIDES (QR code for the 初回誓約書, then the two menu pages) lead
+  // every render of the live gallery, unconditionally — even with no
+  // staff registered at all or nobody currently clocked in — since
+  // they're venue-level info, not tied to who's working right now.
+  const leadHtml = LEAD_SLIDES.map(leadCardHtml).join('');
   if(!staffList.length){
-    return `<div class="empty-hint">スタッフが登録されていません<br>（X8 TIME CHECKの設定タブで登録してください）</div>`;
+    return `<div class="book-grid">${leadHtml}<div class="empty-hint book-grid-span">スタッフが登録されていません<br>（X8 TIME CHECKの設定タブで登録してください）</div></div>`;
   }
   if(galleryReorderMode){
+    // Drag-to-reorder is for rearranging STAFF cards only — the lead
+    // slides have a fixed, always-first position by design, so they're
+    // deliberately left out of this grid rather than shown non-draggable.
     reconcileGalleryDragOrder();
     const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
     if(!galleryDragOrder.length){
@@ -1625,10 +1699,10 @@ function galleryHtml(){
     `;
   }
   const list = visibleGalleryStaffList();
-  if(!list.length){
-    return `<div class="empty-hint">只今出勤中のスタッフはいません<br>出勤すると自動でここに表示されます</div>`;
-  }
-  return `<div class="book-grid">${list.map(s=>bookCardHtml(s)).join('')}</div>`;
+  const staffHtml = list.length
+    ? list.map(s=>bookCardHtml(s)).join('')
+    : `<div class="empty-hint book-grid-span">只今出勤中のスタッフはいません<br>出勤すると自動でここに表示されます</div>`;
+  return `<div class="book-grid">${leadHtml}${staffHtml}</div>`;
 }
 // Deliberately photo-only, no name label: this grid (and the full-screen
 // viewer one tap deeper) is the customer-facing board, and names were
@@ -1647,10 +1721,41 @@ function bookCardHtml(s, dragMode){
     </button>
   `;
 }
+// The QR/menu lead cards: same card chrome as a staff photo, but
+// object-fit:contain (the .contain class — see CSS) instead of cover, so
+// the whole image always stays on screen un-cropped (a QR code cropped to
+// fill a 3:4 tile could lose its corner finder patterns).
+function leadCardHtml(slide){
+  return `
+    <button class="book-card" data-action="openStaffDetail" data-id="${escapeHtml(slide.id)}">
+      <img class="book-photo contain" src="${slide.src}" alt="${escapeHtml(slide.alt||'')}" draggable="false">
+    </button>
+  `;
+}
 
-function detailHtml(staff){
-  if(!staff) return `<div class="empty-hint">スタッフが見つかりません</div>`;
-  return pickerOpen ? detailEditorHtml(staff) : detailViewerHtml(staff);
+function detailHtml(item){
+  if(!item) return `<div class="empty-hint">見つかりません</div>`;
+  if(item.isLead) return leadSlideViewerHtml(item); // fixed slides: no editor, just the swipeable viewer
+  return pickerOpen ? detailEditorHtml(item) : detailViewerHtml(item);
+}
+
+// Same full-screen "tap to fill the screen, swipe to browse" chrome as
+// detailViewerHtml below, minus the ✎ edit button — there's no Firebase
+// data behind a lead slide to edit; updating one of these means shipping
+// a new build, same as any other fixed app content. object-fit:contain
+// (via the .contain class, see CSS) keeps the WHOLE image on screen
+// un-cropped, unlike a staff portrait's deliberate object-fit:cover —
+// critical here since one of these is a QR code a customer needs to
+// actually scan, and cropping could cut into its finder patterns.
+function leadSlideViewerHtml(slide){
+  const list = detailNavList();
+  const idx = list.findIndex(x=>x.id===slide.id);
+  return `
+    <div class="viewer">
+      <img class="viewer-photo contain" src="${slide.src}" alt="${escapeHtml(slide.alt||'')}" draggable="false">
+      ${(list.length>1 && idx!==-1) ? `<div class="viewer-foot"><div class="viewer-count">${idx+1} / ${list.length}</div></div>` : ''}
+    </div>
+  `;
 }
 
 // Tap a card -> this: the photo fills the screen. Swipe left/right to
@@ -1689,7 +1794,7 @@ function detailEditorHtml(staff){
 
 function pickerHtml(staff){
   const sel = selection[staff.id];
-  const isStaffPhotoActive = !sel || sel.kind==='staffPhoto';
+  const isStaffPhotoActive = isPromoPhotoActive(staff.id);
   const promo = staffPhotos[staff.id];
   const hasPhoto = !!resolvedGalleryPhotos[staff.id];
   const hidden = !!galleryHidden[staff.id];
@@ -1717,13 +1822,13 @@ function pickerHtml(staff){
       ${candidatesLoading
         ? `<div class="empty-hint">読み込み中…</div>`
         : (candidatePhotos.length
-          ? `<div class="clockin-grid">${candidatePhotos.map(c=>clockinTileHtml(staff.id, c, sel)).join('')}</div>`
+          ? `<div class="clockin-grid">${candidatePhotos.map(c=>clockinTileHtml(staff.id, c, sel, isStaffPhotoActive)).join('')}</div>`
           : `<div class="empty-hint">最近の出勤時の写真がまだありません</div>`)}
     </div>
   `;
 }
-function clockinTileHtml(staffId, c, sel){
-  const active = !!(sel && sel.kind==='clockin' && sel.eid===c.eid);
+function clockinTileHtml(staffId, c, sel, promoActive){
+  const active = !promoActive && !!(sel && sel.kind==='clockin' && sel.eid===c.eid);
   const label = c.monthKey.slice(5,7) + '/' + c.dayKey + ' ' + c.time;
   return `
     <button class="clockin-tile ${active ? 'active' : ''}" data-action="selectClockinPhoto" data-id="${escapeHtml(staffId)}" data-eid="${escapeHtml(c.eid)}">
@@ -1746,6 +1851,14 @@ function reorderRowHtml(s, i, total){
   const photo = resolvedGalleryPhotos[s.id];
   const excluded = !!excludedStaff[s.id];
   const hidden = !!galleryHidden[s.id];
+  // Surfaces an otherwise-invisible failure mode: this person has a photo
+  // and SOME ナンバー表 has been registered, but their name doesn't match
+  // any entry in it (even after rankForStaffName's loose matching) — so
+  // they'll never get auto-placed until the name is fixed on one side or
+  // the other. Shown as a neutral fact in the same slot as 運営/写真待ち,
+  // never alongside them (those already explain why this row doesn't need
+  // a ナンバー match).
+  const noRankMatch = !!photo && Object.keys(nameRankTable||{}).length>0 && !Number.isFinite(rankForStaffName(s.name));
   return `
     <div class="reorder-row${excluded ? ' excluded' : ''}">
       <input class="reorder-rank" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
@@ -1756,7 +1869,7 @@ function reorderRowHtml(s, i, total){
           : `<div class="reorder-thumb placeholder" style="background:${colorFor(s.id)}">${escapeHtml((s.name||'?').slice(0,1))}</div>`}
         <div class="reorder-text">
           <div class="reorder-name">${escapeHtml(s.name)}</div>
-          ${excluded ? `<div class="reorder-sub">運営（IKEMEN LISTに非表示）</div>` : (hidden ? `<div class="reorder-sub">写真待ちのため非表示中</div>` : '')}
+          ${excluded ? `<div class="reorder-sub">運営（IKEMEN LISTに非表示）</div>` : (hidden ? `<div class="reorder-sub">写真待ちのため非表示中</div>` : (noRankMatch ? `<div class="reorder-sub rank-mismatch">ナンバー表に未登録（名前の表記が違う？）</div>` : ''))}
         </div>
       </button>
       <div class="reorder-btns">
