@@ -319,7 +319,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-21 - 2026-10-10';
+const BUILD_STAMP = 'otokohon-22 - 2026-10-11';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -517,6 +517,7 @@ const attendanceRawByMonth = {}; // {id: {monthKey: raw attendance/{id}_{monthKe
                                   // waiting on a fresh network round-trip.
 let todayMonthKey = monthKeyOf(businessDayOf(new Date()));
 let todayDayKey = dayKeyOf(businessDayOf(new Date()));
+let trackedLiteralMonthKey = monthKeyOf(new Date()); // see refreshTodayKeysAndResubscribe
 let yesterdayMonthKey, yesterdayDayKey; // see recomputeYesterdayKeys() — a shift that starts before
                                   // the business day rolls over and is still going has its 出勤 filed
                                   // under YESTERDAY's day bucket with no 退勤 after it yet, so
@@ -676,7 +677,12 @@ function recomputeYesterdayKeys(){
 }
 function subscribeAttendanceFor(staffId){
   if(!db || attendanceUnsubs[staffId]) return;
-  const monthKeys = Array.from(new Set([todayMonthKey, yesterdayMonthKey]));
+  // Also always subscribe to the LITERAL calendar month (see
+  // recomputeAttendanceStatus for why) — almost always the same month as
+  // todayMonthKey, except for the ~1 hour a year both "it's after midnight
+  // but before this app's own 1am business-day rollover" AND "that midnight
+  // was also the 1st of the month" are true at once.
+  const monthKeys = Array.from(new Set([todayMonthKey, yesterdayMonthKey, monthKeyOf(new Date())]));
   attendanceRawByMonth[staffId] = {};
   const unsubs = monthKeys.map(monthKey=>{
     const path = 'attendance/' + staffId + '_' + monthKey;
@@ -690,11 +696,28 @@ function subscribeAttendanceFor(staffId){
   });
   attendanceUnsubs[staffId] = ()=>{ unsubs.forEach(u=>{ try{ u(); }catch(e){} }); };
 }
+// X8 TIME CHECK itself (the app that actually writes these events) files
+// every clock-in/out under the LITERAL calendar day it's tapped on — it has
+// no 25時/1am cutover of its own, unlike this app's businessDayOf. The two
+// only disagree during one window: 0:00-0:59, after real midnight but before
+// this app's OWN "today" has rolled over. A tap made in exactly that window
+// lands in the literal-today bucket, which — without this third lookup —
+// neither todayDayKey ("still last business day") nor yesterdayDayKey
+// ("the day before that") would ever check, leaving it invisible to
+// computeInStatus for up to an hour: a 退勤 tapped at 0:10 wouldn't clear
+// someone's still-shown "出勤中" until 1am, and symmetrically a fresh 0:10
+// 出勤 wouldn't appear either. (Confirmed directly against X8 TIME CHECK's
+// own write path — monthKeyOf(now)/dayKeyOf(now), no adjustment — not
+// assumed.) Outside that one hour a night this is just the same doc as
+// todayDoc, so merging it into computeInStatus's "latest wins" scan below
+// is always safe, never just an extra case to worry about.
 function recomputeAttendanceStatus(staffId){
   const raw = attendanceRawByMonth[staffId] || {};
   const todayDoc = raw[todayMonthKey] && raw[todayMonthKey].days && raw[todayMonthKey].days[todayDayKey];
   const yesterdayDoc = raw[yesterdayMonthKey] && raw[yesterdayMonthKey].days && raw[yesterdayMonthKey].days[yesterdayDayKey];
-  attendanceStatus[staffId] = computeInStatus([yesterdayDoc, todayDoc]);
+  const literalMonthKey = monthKeyOf(new Date()), literalDayKey = dayKeyOf(new Date());
+  const literalTodayDoc = raw[literalMonthKey] && raw[literalMonthKey].days && raw[literalMonthKey].days[literalDayKey];
+  attendanceStatus[staffId] = computeInStatus([yesterdayDoc, todayDoc, literalTodayDoc]);
   renderApp();
 }
 function unsubscribeAttendanceFor(staffId){
@@ -714,11 +737,19 @@ function syncAttendanceSubscriptions(){
 // Re-points every attendance listener at today's (and yesterday's) doc once
 // the BUSINESS day actually rolls over (see businessDayOf — 25時/1am, not
 // 24:00), instead of silently listening to a now-frozen old day forever.
+// Also catches the literal calendar month changing (real midnight) even
+// while the business day hasn't rolled over yet — the ~once-a-month case
+// where that midnight is also the 1st, so subscribeAttendanceFor's own
+// literal-month subscription (set up back when this staffId was first
+// subscribed, potentially last month) needs rebuilding too; see
+// recomputeAttendanceStatus for why the literal day matters at all.
 function refreshTodayKeysAndResubscribe(){
   const bd = businessDayOf(new Date());
   const mk = monthKeyOf(bd), dk = dayKeyOf(bd);
-  if(mk===todayMonthKey && dk===todayDayKey) return;
+  const literalMk = monthKeyOf(new Date());
+  if(mk===todayMonthKey && dk===todayDayKey && literalMk===trackedLiteralMonthKey) return;
   todayMonthKey = mk; todayDayKey = dk;
+  trackedLiteralMonthKey = literalMk;
   recomputeYesterdayKeys();
   Object.keys(attendanceUnsubs).forEach(unsubscribeAttendanceFor);
   attendanceStatus = {};
@@ -2050,7 +2081,7 @@ function rankImportHtml(){
     <div class="rank-import-intro">
       Excelなどで「名前」と「数字」の2列を選んでコピーし、下の欄にそのまま貼り付けて「保存して反映」を押してください（1行に1人分、名前の後に数字）。<br><br>
       例：<br>たろう　1<br>じろう　2<br>さぶろう　3<br><br>
-      名前が一致する人は、宣材写真が登録済みなら保存した瞬間に、まだ写真がない人は写真が上がり次第、自動でその順位に並び替わります。
+      名前が一致する人は、宣材写真が登録済みなら保存した瞬間に、まだ写真がない人は写真が上がり次第、自動でその順位に並び替わります。カタカナ/ひらがな/ローマ字表記の違いは自動で吸収されます（トム/とむ/TOMなど）。それでも一致しない呼び方がある場合は、名前を「/」で区切って並べてください（例：くまこ/ちび　4）。
     </div>
     <textarea id="rankImportTextarea" class="rank-textarea" placeholder="たろう　1&#10;じろう　2&#10;さぶろう　3">${escapeHtml(text)}</textarea>
     <button class="btn gold block" style="margin-top:12px;" data-action="saveRankImport">保存して反映</button>
