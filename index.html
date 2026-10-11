@@ -353,7 +353,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-29 - 2026-10-11';
+const BUILD_STAMP = 'otokohon-30 - 2026-10-11';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -637,9 +637,13 @@ let trackedLiteralMonthKey = monthKeyOf(new Date()); // see refreshTodayKeysAndR
 let yesterdayMonthKey, yesterdayDayKey; // see recomputeYesterdayKeys() — a shift that starts before
                                   // the business day rolls over and is still going has its 出勤 filed
                                   // under YESTERDAY's day bucket with no 退勤 after it yet, so
-                                  // "currently in" (below) always checks both buckets, never just
+                                  // "currently in" (below) checks both buckets together, never just
                                   // today's alone — on top of businessDayOf's own 25時 cutover, this is
                                   // what keeps a shift showing correctly no matter how late it runs.
+                                  // otokohon-30: yesterday's bucket is only folded in up until 26時(2時)
+                                  // — see isYesterdayCarryoverExpired — past that, a shift with no 退勤
+                                  // yet is presumed forgotten rather than still running, matching this
+                                  // app's own ~26時 force-clear cutoff's same assumption.
 recomputeYesterdayKeys();
 
 let view = 'gallery';            // 'gallery' | 'detail' | 'reorder'
@@ -840,7 +844,13 @@ function recomputeAttendanceStatus(staffId){
   const yesterdayDoc = raw[yesterdayMonthKey] && raw[yesterdayMonthKey].days && raw[yesterdayMonthKey].days[yesterdayDayKey];
   const literalMonthKey = monthKeyOf(new Date()), literalDayKey = dayKeyOf(new Date());
   const literalTodayDoc = raw[literalMonthKey] && raw[literalMonthKey].days && raw[literalMonthKey].days[literalDayKey];
-  attendanceStatus[staffId] = computeInStatus([yesterdayDoc, todayDoc, literalTodayDoc]);
+  // otokohon-30: past 26時(2時), a still-open shift in YESTERDAY's bucket is
+  // presumed a forgotten 退勤 rather than genuinely ongoing, and permanently
+  // stops counting toward "出勤中" (see isYesterdayCarryoverExpired — unlike
+  // isGalleryForceClearActive, this never reverts at 正午). todayDoc/
+  // literalTodayDoc are untouched, so today's own attendance is unaffected.
+  const freshYesterdayDoc = isYesterdayCarryoverExpired() ? null : yesterdayDoc;
+  attendanceStatus[staffId] = computeInStatus([freshYesterdayDoc, todayDoc, literalTodayDoc]);
   renderApp();
 }
 function unsubscribeAttendanceFor(staffId){
@@ -1071,14 +1081,35 @@ function isGalleryForceClearActive(){
   const h = new Date().getHours();
   return h >= GALLERY_FORCE_CLEAR_START_HOUR && h < GALLERY_FORCE_CLEAR_END_HOUR;
 }
+// otokohon-30: 「26時になったら勝手に消す仕様にせんかったっけ？」「26時に消して」
+// という指示で追加。isGalleryForceClearActiveは正午(END_HOUR)になると解除される
+// 「表示だけを一時的に空にする」ゲートで、出勤中データ自体はその裏で消えずに
+// 残っていた——だから正午を過ぎるとまた元どおり復活し、今回の「何人も出勤して
+// なく無い？」のように今夜の営業時間帯まで化けて出てきてしまっていた。
+// こちらは同じ26時を境に使うが、正午では戻らず当日の残り時間すべてに効く——
+// 26時を過ぎたら、前日分(yesterdayDoc)の退勤押し忘れは二度と「出勤中」に数え
+// ない。当日分(todayDoc/literalTodayDoc)は対象外なので、今日ちゃんと出勤した
+// 人の表示には何も影響しない。
+function isYesterdayCarryoverExpired(){
+  return new Date().getHours() >= GALLERY_FORCE_CLEAR_START_HOUR;
+}
 let galleryForceClearWasActive = isGalleryForceClearActive();
+let yesterdayCarryoverWasExpired = isYesterdayCarryoverExpired();
 // refreshTodayKeysAndResubscribe の60秒ごとのチェックは、業務日のキー
 // （1時で切り替わる）が変わった時しか再描画しない——2時や正午の切り替わり
 // はそれとは別物なので、専用の変化検知で拾う（init() 内の setInterval
-// から毎分呼ばれる）。
+// から毎分呼ばれる）。yesterdayCarryoverWasExpiredの変化も同じ仕組みで拾い、
+// 26時の境を越えた瞬間、開いたままの全ページで出勤中判定を再計算する——
+// recomputeAttendanceStatusは本来Firebaseの新着データでしか再実行されない
+// ので、これがないと誰も新しく出退勤を押さないまま26時を迎えても反映されない。
 function tickGalleryForceClear(){
   const active = isGalleryForceClearActive();
   if(active!==galleryForceClearWasActive){ galleryForceClearWasActive = active; renderApp(); }
+  const expired = isYesterdayCarryoverExpired();
+  if(expired!==yesterdayCarryoverWasExpired){
+    yesterdayCarryoverWasExpired = expired;
+    Object.keys(attendanceUnsubs).forEach(recomputeAttendanceStatus);
+  }
 }
 function visibleGalleryStaffList(){
   const base = orderedStaffList().filter(s=>!excludedStaff[s.id] && !galleryHidden[s.id] && !forceHideStaff[s.id]);
