@@ -353,7 +353,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-30 - 2026-10-11';
+const BUILD_STAMP = 'otokohon-31 - 2026-10-11';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -2599,14 +2599,28 @@ function buildStaffCardFilename(kanji, romaji){
   return 'X8_STAFFCARD_' + part + '.png';
 }
 
+// otokohon-31: this used to shrink in 2%-of-startSize steps (up to ~50
+// ctx.font reassignments + measureText() calls per call) -- called twice
+// per redraw (once for kanji, once for romaji), so up to ~100 of these per
+// KEYSTROKE. ctx.font reassignment + measureText() on a custom webfont is
+// noticeably heavier on mobile Safari's canvas/text engine than on desktop
+// Chromium (where this always measured fast, ~6-10ms even with a huge
+// source photo -- see perf_test_large_photo.js), so this loop -- not photo
+// size -- is the more likely real cause of "固まる" on a real iPhone; the
+// preview-image downscale fix elsewhere was still worth keeping (it's a
+// real, separate cost) but apparently wasn't the whole story. Binary
+// search finds the same fitted size in ~10 measureText calls instead of
+// up to ~50: same result, roughly 5x fewer expensive calls per field.
 function cardFitFontSize(ctx, text, family, weight, maxWidth, startSize, minSize){
-  let size = startSize;
-  while(size > minSize){
-    ctx.font = weight + ' ' + Math.round(size) + "px '" + family + "'";
-    if(ctx.measureText(text).width <= maxWidth) break;
-    size -= Math.max(1, startSize * 0.02);
+  ctx.font = weight + ' ' + Math.round(startSize) + "px '" + family + "'";
+  if(ctx.measureText(text).width <= maxWidth) return startSize;
+  let lo = minSize, hi = startSize;
+  for(let i=0;i<10;i++){
+    const mid = (lo + hi) / 2;
+    ctx.font = weight + ' ' + Math.round(mid) + "px '" + family + "'";
+    if(ctx.measureText(text).width <= maxWidth) lo = mid; else hi = mid;
   }
-  return Math.max(size, minSize);
+  return lo;
 }
 
 function cardDrawLetterSpaced(ctx, text, cx, y, spacing){
