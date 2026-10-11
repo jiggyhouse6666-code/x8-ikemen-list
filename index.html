@@ -18,7 +18,7 @@
 <meta http-equiv="Expires" content="0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700;900&family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Great+Vibes&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Noto+Sans+JP:wght@400;500;700;900&family=Noto+Serif+JP:wght@700;900&family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Great+Vibes&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#131019;
@@ -59,6 +59,7 @@ body{
 button, input, select, textarea{ font-family:inherit; }
 button{cursor:pointer;}
 #app{display:flex; flex-direction:column; height:100dvh; max-width:560px; margin:0 auto; position:relative;}
+#app.full-bleed{max-width:none;}
 
 /* ===== header ===== */
 header{
@@ -245,8 +246,16 @@ main.full-bleed{padding:0; overflow:hidden;}
 .reorder-btns-row{display:flex; gap:6px;}
 .reorder-btns .btn{width:34px; height:34px; padding:0; font-size:13px;}
 .reorder-btns .btn:disabled{opacity:0.25;}
-.ops-toggle{
-  width:74px; height:24px; padding:0; font-size:10.5px; font-weight:700; letter-spacing:0.2px;
+/* .reorder-btns .btn above and .ops-toggle below are equal-specificity
+   (two classes each): .reorder-btns .ops-toggle (also two classes, but
+   later in source) is used here instead of a bare .ops-toggle so the
+   sizing below reliably wins instead of silently losing to the 34px
+   icon-button default — a real pre-existing bug (bare .ops-toggle's width
+   never actually applied; it only looked fine for 運営's 2 characters by
+   coincidence, since those happened to fit inside 34px anyway). Widened
+   to comfortably fit 常時表示/✓常時表示 (4-5 chars) as well as 運営/✓運営. */
+.reorder-btns .ops-toggle{
+  width:84px; height:24px; padding:0; font-size:10.5px; font-weight:700; letter-spacing:0.2px;
   border-radius:7px; white-space:nowrap; overflow:hidden;
 }
 .ops-toggle.active{font-size:9.5px; background:var(--gold-grad); color:#241a05; border-color:transparent;}
@@ -257,6 +266,27 @@ main.full-bleed{padding:0; overflow:hidden;}
   width:100%; min-height:300px; background:var(--surface); border:1px solid var(--border);
   border-radius:12px; color:var(--text); font-size:14px; font-family:inherit; line-height:1.7;
   padding:12px; resize:vertical; box-sizing:border-box;
+}
+
+/* ===== スタッフカード作成 ===== */
+.field-label{font-size:12.5px; color:var(--text-dim); margin:0 0 6px;}
+.staffcard-input{
+  width:100%; background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  color:var(--text); font-size:15px; font-family:inherit; padding:11px 12px; box-sizing:border-box;
+  margin-bottom:14px;
+}
+.staffcard-dropzone{
+  border:1.5px dashed var(--border); border-radius:var(--radius); padding:22px 14px;
+  text-align:center; background:var(--surface); margin-bottom:16px; cursor:pointer;
+}
+.staffcard-dropzone.has-photo{padding:14px;}
+.staffcard-dz-title{font-size:13.5px; font-weight:500; margin-bottom:3px;}
+.staffcard-dz-hint{font-size:11.5px; color:var(--text-faint);}
+.staffcard-dz-thumb{max-width:100%; max-height:110px; border-radius:8px; display:block; margin:0 auto 10px;}
+.staffcard-preview-wrap{display:flex; justify-content:center;}
+#staffCardCanvas{
+  width:100%; max-width:300px; height:auto; display:block; border-radius:8px;
+  border:1px solid var(--border); box-shadow:0 10px 30px rgba(0,0,0,0.45); background:#000;
 }
 
 /* ===== modal ===== */
@@ -295,6 +325,7 @@ main.full-bleed{padding:0; overflow:hidden;}
 <div id="toast"></div>
 <input type="file" accept="image/*" id="promoPhotoFileInput" class="visually-hidden-file">
 <input type="file" accept="image/*" id="staffStockFileInput" class="visually-hidden-file">
+<input type="file" accept="image/*" id="staffCardFileInput" class="visually-hidden-file">
 
 <script type="module">
 'use strict';
@@ -322,7 +353,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-25 - 2026-10-11';
+const BUILD_STAMP = 'otokohon-29 - 2026-10-11';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -458,6 +489,11 @@ const LEAD_SLIDES = [
   { id:'__lead_menu2__', isLead:true, alt:'LIMITED MENU', src:LEAD_SLIDE_MENU2 },
 ];
 
+// X8GROUPロゴ（スタッフカード作成ツール用）。ネットワーク取得なしで即座に
+// 使えるよう、他のLEAD_SLIDE_*と同じくbase64で直接埋め込む（「ロゴも最初
+// から入れろ」との指示どおり、別ファイル読み込みを待つ隙間をなくすため）。
+const X8GROUP_LOGO_DATAURL = 'data:image/png;base64,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';
+
 /* ---------- state ---------- */
 let staffList = [];              // [{id,name}] from config/staff (current roster only)
 let staffPhotos = {};            // {id: dataUrl} from staffPhotos/ (shared with X8 TIME CHECK)
@@ -497,6 +533,68 @@ let galleryHidden = {};          // {id: true} from otokohonGalleryHidden — st
                                   // available for that staff member, it's cleared automatically — see
                                   // clearGalleryHiddenWherePhotoAppeared(). Stored separately, same
                                   // pattern as otokohonOrder/otokohonExcluded.
+
+let alwaysShowStaff = {};        // {id: true} from otokohonAlwaysShow — "出勤のやつと連動しなくても
+                                  // 顔写真乗る仕様にもして欲しい" (2026-10-11): a hand-picked staff
+                                  // member shows in the gallery ALL the time, fully decoupled from
+                                  // attendance — not just the ordinary 出勤中 check, but also the 2時
+                                  // -正午 force-clear gate (isGalleryForceClearActive): "connected to
+                                  // attendance" covers both. excludedStaff/運営 still wins over this if
+                                  // both are somehow set on the same person (never customer-facing beats
+                                  // always show); galleryHidden (no photo yet) still wins too, since
+                                  // there's nothing to show either way. Stored separately, same pattern
+                                  // as otokohonOrder/otokohonExcluded/otokohonGalleryHidden.
+
+let forceHideStaff = {};         // {id: true} from otokohonForceHide — "退勤押さなくても男本から消す
+                                  // こともできる様にして欲しい" (2026-10-11): the OPPOSITE of
+                                  // alwaysShowStaff/常時表示 — a staff member is pulled from the
+                                  // gallery immediately even though X8 TIME CHECK still shows them
+                                  // clocked in (no 退勤 needed). Wins over attendanceStatus AND
+                                  // alwaysShowStaff/常時表示 (an explicit "hide them now" always beats
+                                  // "always show them") — see visibleGalleryStaffList(). Per the user's
+                                  // own answer, this is a plain manual toggle like 運営/常時表示: it
+                                  // stays hidden until someone taps it again by hand, with no automatic
+                                  // clearing on the next clock-in. Stored separately, same pattern as
+                                  // otokohonOrder/otokohonExcluded/otokohonGalleryHidden/otokohonAlwaysShow
+                                  // — config/staff and X8 TIME CHECK's own attendance data are never touched.
+
+let romajiNames = {};            // {id: "MAYA"} from otokohonRomaji — the romaji/English line shown
+                                  // under the kanji name on a generated スタッフカード (see the
+                                  // staffCard screen below). Typed once per staff from that screen and
+                                  // remembered from then on, same {id: value} pattern as the flags above.
+                                  // Not used anywhere else in the app (config/staff's own name field is
+                                  // the kanji/Japanese name).
+
+// ---- スタッフカード作成（2026-10-11, 「このツール男本に入れろ」） ----
+// A small self-contained screen (view==='staffCard') that composites a
+// freshly-uploaded photo with the staff's name and the X8GROUP logo into a
+// downloadable PNG card — the same tool originally built as a standalone
+// page, now folded into the app itself per the user's request. The EXISTING
+// staffPhotos/{id} image is deliberately NOT reused as the source here: it's
+// already downsized/JPEG-compressed for the gallery (see STAFF_PHOTO_ATTEMPTS
+// above), and the user was explicit that the card must keep the photo at
+// full, un-reduced quality — so this screen always asks for a fresh upload,
+// read at its native resolution, same as the original standalone tool.
+let activeCardStaffId = null;    // which staff this screen is open for
+let staffCardPhotoImg = null;    // the freshly-uploaded <img>, at native resolution, or null
+// Guards renderApp() (see its top) from wiping this screen's in-progress
+// upload/typing: once staffCard has rendered for the current visit, further
+// renderApp() calls triggered by unrelated Firebase updates (someone else
+// clocking in, say — can happen any time) must NOT replace main.innerHTML,
+// or an admin mid-upload would silently lose their work. Reset on entry/exit.
+let staffCardScreenMounted = false;
+const STAFFCARD_DIV1_FRAC = 0.60;   // photo / name-band divider, as a fraction of card height
+const STAFFCARD_DIV2_FRAC = 0.77;   // name-band / logo-band divider
+const STAFFCARD_LOGO_WIDTH_FRAC = 0.19; // logo block width as a fraction of card width
+const staffCardLogoImg = new Image();
+staffCardLogoImg.onload = ()=>{
+  // Decoding even a data: URL image is asynchronous, so on a very fast
+  // navigation the staff-card screen could already be open before this
+  // fires. Self-heal the live preview the same way the font-ready check
+  // below does; the download path has its own wait in downloadStaffCardNow.
+  if(view==='staffCard' && document.getElementById('staffCardCanvas')) redrawStaffCardPreview();
+};
+staffCardLogoImg.src = X8GROUP_LOGO_DATAURL;
 
 // A pasted-in monthly ranking ("9月ナンバー" etc.), keyed by NAME (not id)
 // so it can be prepared before someone even has a 宣材写真 yet, and still
@@ -579,6 +677,9 @@ async function init(){
   subscribeStaffOrder();
   subscribeExcludedStaff();
   subscribeGalleryHidden();
+  subscribeAlwaysShowStaff();
+  subscribeForceHideStaff();
+  subscribeRomajiNames();
   subscribeNameRankTable();
   subscribeRankApplied();
   subscribeConnectionState();
@@ -601,6 +702,7 @@ async function init(){
   document.getElementById('toast').addEventListener('click', ()=>{ document.getElementById('toast').classList.remove('show'); });
   document.getElementById('promoPhotoFileInput').addEventListener('change', onPromoPhotoFileSelected);
   document.getElementById('staffStockFileInput').addEventListener('change', onStaffStockFileSelected);
+  document.getElementById('staffCardFileInput').addEventListener('change', onStaffCardFileSelected);
   // Catches a page left open across midnight: without this, the attendance
   // listeners below would keep watching yesterday's (now frozen) doc forever.
   // Also ticks the 2時/正午 force-clear boundary (see tickGalleryForceClear)
@@ -877,6 +979,39 @@ function subscribeGalleryHidden(){
   );
 }
 
+function subscribeAlwaysShowStaff(){
+  if(!db) return;
+  db.doc('otokohonAlwaysShow').onSnapshot(
+    (snap)=>{
+      alwaysShowStaff = (snap.exists && snap.data()) || {};
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
+function subscribeForceHideStaff(){
+  if(!db) return;
+  db.doc('otokohonForceHide').onSnapshot(
+    (snap)=>{
+      forceHideStaff = (snap.exists && snap.data()) || {};
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
+function subscribeRomajiNames(){
+  if(!db) return;
+  db.doc('otokohonRomaji').onSnapshot(
+    (snap)=>{
+      romajiNames = (snap.exists && snap.data()) || {};
+      renderApp();
+    },
+    ()=>{}
+  );
+}
+
 // The display order this app shows (gallery grid + reorder screen): the
 // saved order, limited to staff who still exist, with any staff NOT yet in
 // it (brand new, or before anyone has ever reordered) appended at the end
@@ -893,10 +1028,26 @@ function orderedStaffList(){
 // board is for customers to see who's working right now, not a full staff
 // list. 運営 (excludedStaff) never appear here even while clocked in with a
 // photo, and neither does anyone manually hidden for having no photo yet
-// (galleryHidden). The reorder screen still uses orderedStaffList()
-// (everyone, both kinds of hidden staff included), since relative order —
-// and the 運営/非表示 toggles themselves — need to be set up for staff
-// before their first shift too.
+// (galleryHidden) or manually force-hidden (forceHideStaff). The reorder
+// screen still uses orderedStaffList() (everyone, all kinds of hidden staff
+// included), since relative order — and the 運営/非表示/常時表示/強制非表示
+// toggles themselves — need to be set up for staff before their first shift too.
+//
+// 常時表示(alwaysShowStaff) は出退勤と完全に切り離す指定なので、通常の
+// 出勤中チェックだけでなく、下の強制消去ゲートもバイパスする——「連動し
+// なくても」という指示どおり、attendanceに関する判定を丸ごと素通りする。
+// ただし運営(excludedStaff)はそれより優先——そもそも客向けに出さない人
+// なので、常時表示が付いていても出さない。galleryHidden（写真が無い）も
+// 優先——出す写真自体が無ければ常時表示の意味がない。
+//
+// forceHideStaff(強制非表示)は常時表示のちょうど逆——「退勤押さなくても
+// 男本から消すこともできる様にして欲しい」(2026-10-11)。出勤中かどうか
+// (attendanceStatus)もX8 TIME CHECK側の退勤操作も一切関係なく、この
+// フラグが立っている間は問答無用でギャラリーから外れる。常時表示より
+// 強い（両方立っていたら非表示が勝つ——「今すぐ消す」という明示的な指示
+// が「常に出す」という既定の指定より優先されるべきなので）。運営/
+// 写真待ちはそれよりさらに強い——元々客向けに出さない人・出す写真が無い
+// 人なので、強制非表示を今から解除する余地すら関係ない。
 //
 // 深夜の「退勤タップ忘れ」対策: 2時(26時)を過ぎたら、実際の出退勤データが
 // 何であろうと強制的に「誰もいない」扱いにする——「25時か26時すぎたら全員
@@ -923,8 +1074,9 @@ function tickGalleryForceClear(){
   if(active!==galleryForceClearWasActive){ galleryForceClearWasActive = active; renderApp(); }
 }
 function visibleGalleryStaffList(){
-  if(isGalleryForceClearActive()) return [];
-  return orderedStaffList().filter(s=>attendanceStatus[s.id] && !excludedStaff[s.id] && !galleryHidden[s.id]);
+  const base = orderedStaffList().filter(s=>!excludedStaff[s.id] && !galleryHidden[s.id] && !forceHideStaff[s.id]);
+  if(isGalleryForceClearActive()) return base.filter(s=>alwaysShowStaff[s.id]);
+  return base.filter(s=>attendanceStatus[s.id] || alwaysShowStaff[s.id]);
 }
 
 async function resolveInlinePhoto(photoRef){
@@ -1290,6 +1442,40 @@ async function toggleOpsStaff(id){
   if(!db) return;
   try{ await db.doc('otokohonExcluded').set(next); }
   catch(e){ showToast('運営設定の保存に失敗しました'); }
+}
+
+// Marks/unmarks a staff member as 常時表示: once set, visibleGalleryStaffList()
+// shows them regardless of attendance — the ordinary 出勤中 check AND the
+// 2時-正午 force-clear gate both sit behind this flag (see alwaysShowStaff's
+// comment up top). Written to its own otokohonAlwaysShow doc, same pattern
+// as otokohonExcluded/otokohonGalleryHidden — config/staff and X8 TIME
+// CHECK are never touched.
+async function toggleAlwaysShowStaff(id){
+  const next = Object.assign({}, alwaysShowStaff);
+  if(next[id]) delete next[id]; else next[id] = true;
+  alwaysShowStaff = next;
+  renderApp();
+  if(!db) return;
+  try{ await db.doc('otokohonAlwaysShow').set(next); }
+  catch(e){ showToast('常時表示設定の保存に失敗しました'); }
+}
+
+// Marks/unmarks a staff member as 強制非表示 (the opposite of 常時表示):
+// once set, visibleGalleryStaffList() hides them immediately regardless of
+// attendanceStatus — no 退勤 needed in X8 TIME CHECK. Per the user's own
+// answer, this is a plain sticky toggle (same as 運営/常時表示): it stays
+// on until tapped again by hand, with no automatic clearing on their next
+// clock-in. Written to its own otokohonForceHide doc, same pattern as
+// otokohonExcluded/otokohonGalleryHidden/otokohonAlwaysShow — config/staff
+// and X8 TIME CHECK's own attendance data are never touched.
+async function toggleForceHideStaff(id){
+  const next = Object.assign({}, forceHideStaff);
+  if(next[id]) delete next[id]; else next[id] = true;
+  forceHideStaff = next;
+  renderApp();
+  if(!db) return;
+  try{ await db.doc('otokohonForceHide').set(next); }
+  catch(e){ showToast('非表示設定の保存に失敗しました'); }
 }
 
 // Manually hides/un-hides a staff member who currently has no photo from
@@ -1835,6 +2021,8 @@ function onAppClick(e){
   else if(action==='moveStaffDown') moveStaff(el.dataset.id, 1);
   else if(action==='toggleOpsStaff') toggleOpsStaff(el.dataset.id);
   else if(action==='toggleGalleryHidden') toggleGalleryHidden(el.dataset.id);
+  else if(action==='toggleAlwaysShowStaff') toggleAlwaysShowStaff(el.dataset.id);
+  else if(action==='toggleForceHideStaff') toggleForceHideStaff(el.dataset.id);
   else if(action==='openRankImport') openRankImport();
   else if(action==='backFromRankImport') backFromRankImport();
   else if(action==='saveRankImport') saveRankImport();
@@ -1848,6 +2036,10 @@ function onAppClick(e){
   else if(action==='modalCancel') closeModal();
   else if(action==='modalPasswordSubmit') submitModalPassword();
   else if(action==='modalConfirmYes') modalConfirmYes();
+  else if(action==='openStaffCard') openStaffCard(el.dataset.id);
+  else if(action==='backFromStaffCard') backFromStaffCard();
+  else if(action==='pickStaffCardFile'){ const inp = document.getElementById('staffCardFileInput'); if(inp) inp.click(); }
+  else if(action==='downloadStaffCard') downloadStaffCardNow();
 }
 
 // The reorder screen's rank input (順位) is a text field, not a button, so
@@ -1876,6 +2068,7 @@ function onAppFocusIn(e){
 // instead of silently reverting to the last-saved table.
 function onAppInput(e){
   if(e.target && e.target.id==='rankImportTextarea') rankImportDraft = e.target.value;
+  else if(e.target && (e.target.id==='staffCardKanjiInput' || e.target.id==='staffCardRomajiInput')) redrawStaffCardPreview();
 }
 
 /* ---------- render ---------- */
@@ -1892,8 +2085,17 @@ function renderApp(){
   if(view==='reorder' && activeEl && activeEl.classList && activeEl.classList.contains('reorder-rank')){
     return;
   }
+  // Same idea as the reorder-rank guard just above, but for the whole
+  // スタッフカード screen: once it's rendered for this visit, an unrelated
+  // Firebase update (another staff member clocking in, say) must not
+  // replace main.innerHTML and wipe the admin's uploaded photo / typed
+  // name mid-task. openStaffCard()/backFromStaffCard() reset the flag.
+  if(view==='staffCard' && staffCardScreenMounted){
+    return;
+  }
   const header = document.getElementById('headerInner');
   const main = document.getElementById('main');
+  const appEl = document.getElementById('app');
   if(view==='detail'){
     const item = findDetailItem(activeStaffId);
     header.innerHTML = `
@@ -1902,9 +2104,11 @@ function renderApp(){
       <div class="header-spacer"></div>
     `;
     main.classList.toggle('full-bleed', !pickerOpen);
+    appEl.classList.toggle('full-bleed', !pickerOpen);
     main.innerHTML = detailHtml(item);
   } else if(view==='reorder'){
     main.classList.remove('full-bleed');
+    appEl.classList.remove('full-bleed');
     header.innerHTML = `
       <button class="btn icon-only ghost" data-action="backFromReorder">‹</button>
       <div class="header-title-center">並び替え</div>
@@ -1913,14 +2117,28 @@ function renderApp(){
     main.innerHTML = reorderHtml();
   } else if(view==='rankImport'){
     main.classList.remove('full-bleed');
+    appEl.classList.remove('full-bleed');
     header.innerHTML = `
       <button class="btn icon-only ghost" data-action="backFromRankImport">‹</button>
       <div class="header-title-center">ナンバー登録</div>
       <div class="header-spacer"></div>
     `;
     main.innerHTML = rankImportHtml();
+  } else if(view==='staffCard'){
+    main.classList.remove('full-bleed');
+    appEl.classList.remove('full-bleed');
+    const cardStaff = staffList.find(s=>s.id===activeCardStaffId) || null;
+    header.innerHTML = `
+      <button class="btn icon-only ghost" data-action="backFromStaffCard">‹</button>
+      <div class="header-title-center">カード作成${cardStaff ? '：' + escapeHtml(cardStaff.name) : ''}</div>
+      <div class="header-spacer"></div>
+    `;
+    main.innerHTML = staffCardHtml(cardStaff);
+    redrawStaffCardPreview();
+    staffCardScreenMounted = true;
   } else {
     main.classList.remove('full-bleed');
+    appEl.classList.remove('full-bleed');
     header.innerHTML = galleryReorderMode ? `
       <div class="header-title-center">ドラッグして並べ替え</div>
       <button class="btn gold" data-action="finishGalleryReorder" style="flex:0 0 auto; padding:8px 16px;">完了</button>
@@ -2119,7 +2337,7 @@ function reorderHtml(){
   const list = orderedStaffList();
   if(!list.length) return `<div class="empty-hint">スタッフが登録されていません</div>`;
   return `
-    <div class="hint" style="margin-bottom:14px;">数字を直接入力すると、その順位に移動します。右上の「#」から売上ナンバーをまとめて登録すると、名前が一致する人は写真が上がり次第、自動でその順位になります。▲▼でも1つずつ動かせます。「運営」ボタンでIKEMEN LISTに出さない人を設定できます。名前をタップすると写真を編集できます（出勤中でなくてもOK）。写真が無いまま出勤した人は、その編集画面から一時的にIKEMEN LISTから消せます（写真が付くと自動で戻ります）。</div>
+    <div class="hint" style="margin-bottom:14px;">数字を直接入力すると、その順位に移動します。右上の「#」から売上ナンバーをまとめて登録すると、名前が一致する人は写真が上がり次第、自動でその順位になります。▲▼でも1つずつ動かせます。「運営」ボタンでIKEMEN LISTに出さない人を設定できます。「常時表示」ボタンを付けると、出勤してなくてもその人だけは常にIKEMEN LISTに表示されます。「非表示」ボタンを付けると、退勤を押さなくてもその人だけその場でIKEMEN LISTから消せます（もう一度タップするまで非表示のままです）。名前をタップすると写真を編集できます（出勤中でなくてもOK）。写真が無いまま出勤した人は、その編集画面から一時的にIKEMEN LISTから消せます（写真が付くと自動で戻ります）。「カード作成」ボタンから、名前とロゴ入りのスタッフカード画像を作ってダウンロードできます。</div>
     <div class="reorder-list">${list.map((s,i)=>reorderRowHtml(s, i, list.length)).join('')}</div>
   `;
 }
@@ -2127,16 +2345,27 @@ function reorderRowHtml(s, i, total){
   const photo = resolvedGalleryPhotos[s.id];
   const excluded = !!excludedStaff[s.id];
   const hidden = !!galleryHidden[s.id];
+  const forceHidden = !!forceHideStaff[s.id];
+  const alwaysShow = !!alwaysShowStaff[s.id];
   // Surfaces an otherwise-invisible failure mode: this person has a photo
   // and SOME ナンバー表 has been registered, but their name doesn't match
   // any entry in it (even after rankForStaffName's loose matching) — so
   // they'll never get auto-placed until the name is fixed on one side or
-  // the other. Shown as a neutral fact in the same slot as 運営/写真待ち,
-  // never alongside them (those already explain why this row doesn't need
-  // a ナンバー match).
+  // the other. Shown as a neutral fact in the same slot as 運営/写真待ち/
+  // 非表示/常時表示, never alongside them (those already explain why this
+  // row doesn't need a ナンバー match).
   const noRankMatch = !!photo && Object.keys(nameRankTable||{}).length>0 && !Number.isFinite(rankForStaffName(s.name));
+  // Precedence for the one-line sub-label: 運営(never shown) > 写真待ち(nothing
+  // to show yet) > 強制非表示(manually pulled right now) > 常時表示(shown
+  // regardless of attendance) > ナンバー不一致.
+  const subLabel = excluded ? '運営（IKEMEN LISTに非表示）'
+    : hidden ? '写真待ちのため非表示中'
+    : forceHidden ? '手動で非表示中（タップで解除）'
+    : alwaysShow ? '常時表示中（出勤してなくても表示）'
+    : noRankMatch ? 'ナンバー表に未登録（名前の表記が違う？）'
+    : '';
   return `
-    <div class="reorder-row${excluded ? ' excluded' : ''}">
+    <div class="reorder-row${(excluded || forceHidden) ? ' excluded' : ''}">
       <input class="reorder-rank" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
         value="${i+1}" data-action="setStaffPosition" data-id="${escapeHtml(s.id)}" aria-label="順位">
       <button class="reorder-main" data-action="openStaffDetail" data-id="${escapeHtml(s.id)}" data-return="reorder">
@@ -2145,7 +2374,7 @@ function reorderRowHtml(s, i, total){
           : `<div class="reorder-thumb placeholder" style="background:${colorFor(s.id)}">${escapeHtml((s.name||'?').slice(0,1))}</div>`}
         <div class="reorder-text">
           <div class="reorder-name">${escapeHtml(s.name)}</div>
-          ${excluded ? `<div class="reorder-sub">運営（IKEMEN LISTに非表示）</div>` : (hidden ? `<div class="reorder-sub">写真待ちのため非表示中</div>` : (noRankMatch ? `<div class="reorder-sub rank-mismatch">ナンバー表に未登録（名前の表記が違う？）</div>` : ''))}
+          ${subLabel ? `<div class="reorder-sub${noRankMatch && !excluded && !hidden && !forceHidden && !alwaysShow ? ' rank-mismatch' : ''}">${subLabel}</div>` : ''}
         </div>
       </button>
       <div class="reorder-btns">
@@ -2154,6 +2383,9 @@ function reorderRowHtml(s, i, total){
           <button class="btn icon-only ghost" data-action="moveStaffDown" data-id="${escapeHtml(s.id)}" ${i===total-1 ? 'disabled' : ''}>▼</button>
         </div>
         <button class="btn ghost ops-toggle${excluded ? ' active' : ''}" data-action="toggleOpsStaff" data-id="${escapeHtml(s.id)}">${excluded ? '✓運営' : '運営'}</button>
+        <button class="btn ghost ops-toggle${alwaysShow ? ' active' : ''}" data-action="toggleAlwaysShowStaff" data-id="${escapeHtml(s.id)}">${alwaysShow ? '✓常時表示' : '常時表示'}</button>
+        <button class="btn ghost ops-toggle${forceHidden ? ' active' : ''}" data-action="toggleForceHideStaff" data-id="${escapeHtml(s.id)}">${forceHidden ? '✓非表示' : '非表示'}</button>
+        <button class="btn ghost ops-toggle" data-action="openStaffCard" data-id="${escapeHtml(s.id)}">カード作成</button>
       </div>
     </div>
   `;
@@ -2170,6 +2402,240 @@ function rankImportHtml(){
     <textarea id="rankImportTextarea" class="rank-textarea" placeholder="たろう　1&#10;じろう　2&#10;さぶろう　3">${escapeHtml(text)}</textarea>
     <button class="btn gold block" style="margin-top:12px;" data-action="saveRankImport">保存して反映</button>
   `;
+}
+
+/* ---------- スタッフカード作成 ---------- */
+
+function openStaffCard(id){
+  activeCardStaffId = id;
+  staffCardPhotoImg = null;
+  staffCardScreenMounted = false;
+  view = 'staffCard';
+  renderApp();
+}
+function backFromStaffCard(){
+  view = 'reorder';
+  activeCardStaffId = null;
+  staffCardPhotoImg = null;
+  staffCardScreenMounted = false;
+  renderApp();
+}
+
+function staffCardHtml(staff){
+  const kanjiDefault = staff ? (staff.name || '') : '';
+  const romajiDefault = staff ? (romajiNames[staff.id] || '') : '';
+  return `
+    <div class="hint" style="margin-bottom:14px;">写真をアップロードすると、名前とロゴ入りのカードを自動で作成します。写真は縮小せずそのままの画質で書き出されます。</div>
+    <div class="staffcard-dropzone" id="staffCardDropzone" data-action="pickStaffCardFile">
+      <div class="staffcard-dz-title" id="staffCardDzTitle">クリックして写真を選択</div>
+      <div class="staffcard-dz-hint">カードごとに毎回、画質を落とさないため新しい写真を選んでください</div>
+    </div>
+    <div class="field-label">名前</div>
+    <input type="text" id="staffCardKanjiInput" class="staffcard-input" value="${escapeHtml(kanjiDefault)}" maxlength="14" autocomplete="off">
+    <div class="field-label">ローマ字</div>
+    <input type="text" id="staffCardRomajiInput" class="staffcard-input" value="${escapeHtml(romajiDefault)}" maxlength="24" autocomplete="off" placeholder="例：MAYA" style="margin-bottom:6px;">
+    <div class="hint" style="margin:0 0 16px;">カードには自動で大文字で表示されます。一度入力すると次回から自動で表示されます。</div>
+    <div class="staffcard-preview-wrap"><canvas id="staffCardCanvas"></canvas></div>
+    <button class="btn gold block" id="staffCardDownloadBtn" data-action="downloadStaffCard" style="margin-top:16px;">カードをダウンロード</button>
+  `;
+}
+
+function onStaffCardFileSelected(e){
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  if(!file.type || file.type.indexOf('image/')!==0){ showToast('画像ファイルを選択してください'); return; }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{
+    staffCardPhotoImg = img;
+    const dz = document.getElementById('staffCardDropzone');
+    if(dz){
+      dz.classList.add('has-photo');
+      dz.innerHTML = `<img class="staffcard-dz-thumb" src="${url}" alt="">`
+        + `<div class="staffcard-dz-title">クリックして写真を変更</div>`;
+    }
+    redrawStaffCardPreview();
+  };
+  img.onerror = ()=>{ showToast('写真を読み込めませんでした'); URL.revokeObjectURL(url); };
+  img.src = url;
+}
+
+function redrawStaffCardPreview(){
+  const canvas = document.getElementById('staffCardCanvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const kanjiEl = document.getElementById('staffCardKanjiInput');
+  const romajiEl = document.getElementById('staffCardRomajiInput');
+  const kanji = kanjiEl ? kanjiEl.value.trim() : '';
+  const romaji = romajiEl ? romajiEl.value.trim() : '';
+
+  let W, H;
+  if(staffCardPhotoImg){
+    const nW = staffCardPhotoImg.naturalWidth, nH = staffCardPhotoImg.naturalHeight;
+    const maxDim = 760;
+    const scale = Math.min(1, maxDim / Math.max(nW, nH));
+    W = Math.round(nW * scale); H = Math.round(nH * scale);
+  } else {
+    W = 540; H = 764; // placeholder aspect ratio
+  }
+  canvas.width = W; canvas.height = H;
+  drawStaffCard(ctx, W, H, staffCardPhotoImg, kanji, romaji, staffCardLogoImg.complete ? staffCardLogoImg : null);
+
+  // Canvas text doesn't auto-redraw when a web font finishes loading (unlike
+  // ordinary CSS text), so the very first draw right after navigating here
+  // could briefly use a fallback font if Noto Serif JP / Playfair Display
+  // are still being fetched. Re-draw once more once they're confirmed ready;
+  // harmless no-op if they already were.
+  if(document.fonts && document.fonts.status !== 'loaded'){
+    document.fonts.ready.then(()=>{
+      if(view==='staffCard' && document.getElementById('staffCardCanvas')) redrawStaffCardPreview();
+    });
+  }
+}
+
+function downloadStaffCardNow(){
+  if(!staffCardPhotoImg){ showToast('先に写真を選択してください'); return; }
+  if(!staffCardLogoImg.complete){
+    // Logo decode hasn't finished yet (extremely rare for a ~6.6KB data:
+    // URL, but possible on a very fast first-navigation). A download is a
+    // one-shot export with no later chance to redraw, so wait for the
+    // image rather than silently shipping a PNG missing the logo.
+    staffCardLogoImg.addEventListener('load', downloadStaffCardNow, { once:true });
+    return;
+  }
+  const kanjiEl = document.getElementById('staffCardKanjiInput');
+  const romajiEl = document.getElementById('staffCardRomajiInput');
+  const kanji = kanjiEl ? kanjiEl.value.trim() : '';
+  const romaji = romajiEl ? romajiEl.value.trim() : '';
+
+  const W = staffCardPhotoImg.naturalWidth, H = staffCardPhotoImg.naturalHeight;
+  const off = document.createElement('canvas');
+  off.width = W; off.height = H;
+  const octx = off.getContext('2d');
+  drawStaffCard(octx, W, H, staffCardPhotoImg, kanji, romaji, staffCardLogoImg);
+  off.toBlob((blob)=>{
+    if(!blob){ showToast('書き出しに失敗しました'); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = buildStaffCardFilename(kanji, romaji);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    showToast('ダウンロードしました');
+  }, 'image/png');
+
+  if(activeCardStaffId && db){
+    const prev = romajiNames[activeCardStaffId] || '';
+    if(romaji !== prev){
+      const next = Object.assign({}, romajiNames);
+      if(romaji) next[activeCardStaffId] = romaji; else delete next[activeCardStaffId];
+      romajiNames = next;
+      db.doc('otokohonRomaji').set(next).catch(()=>{});
+    }
+  }
+}
+
+function buildStaffCardFilename(kanji, romaji){
+  const sanitize = (s)=> (s || '').replace(/[\\/:*?"<>|\s]+/g, '').slice(0, 30);
+  const part = sanitize(romaji) || sanitize(kanji) || 'STAFF';
+  return 'X8_STAFFCARD_' + part + '.png';
+}
+
+function cardFitFontSize(ctx, text, family, weight, maxWidth, startSize, minSize){
+  let size = startSize;
+  while(size > minSize){
+    ctx.font = weight + ' ' + Math.round(size) + "px '" + family + "'";
+    if(ctx.measureText(text).width <= maxWidth) break;
+    size -= Math.max(1, startSize * 0.02);
+  }
+  return Math.max(size, minSize);
+}
+
+function cardDrawLetterSpaced(ctx, text, cx, y, spacing){
+  const chars = Array.from(text);
+  const widths = chars.map(ch => ctx.measureText(ch).width);
+  const total = widths.reduce((a,b) => a+b, 0) + spacing * Math.max(0, chars.length - 1);
+  let x = cx - total/2;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = 'left';
+  for(let i=0;i<chars.length;i++){
+    ctx.fillText(chars[i], x, y);
+    x += widths[i] + spacing;
+  }
+  ctx.textAlign = prevAlign;
+}
+
+function cardDrawPlaceholderPhoto(ctx, W, H){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, '#2c2a26');
+  g.addColorStop(0.55, '#171512');
+  g.addColorStop(1, '#0a0908');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = 'rgba(243,239,230,0.38)';
+  ctx.textAlign = 'center';
+  ctx.font = '500 ' + Math.round(H*0.026) + "px 'Noto Sans JP', sans-serif";
+  ctx.fillText('写真をアップロードしてください', W/2, H*0.30);
+}
+
+function cardDrawNameBlock(ctx, W, top, bandH, kanji, romajiRaw){
+  const maxW = W * 0.84;
+  const romaji = (romajiRaw || '').toUpperCase();
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#f7f4ec';
+
+  let kanjiSize = 0, romajiSize = 0;
+  if(kanji){ kanjiSize = cardFitFontSize(ctx, kanji, 'Noto Serif JP', 900, maxW, bandH*0.50, 10); }
+  if(romaji){ romajiSize = cardFitFontSize(ctx, romaji, 'Playfair Display', 700, maxW, bandH*0.20, 8); }
+
+  const gap = bandH * 0.09;
+  const kanjiBlockH = kanjiSize * 0.86;
+  const romajiBlockH = romajiSize * 0.72;
+  const totalH = (kanji ? kanjiBlockH : 0) + (kanji && romaji ? gap : 0) + (romaji ? romajiBlockH : 0);
+
+  let cursorY = top + (bandH - totalH)/2;
+
+  if(kanji){
+    ctx.font = '900 ' + Math.round(kanjiSize) + "px 'Noto Serif JP'";
+    ctx.fillText(kanji, W/2, cursorY + kanjiSize*0.80);
+    cursorY += kanjiBlockH + (romaji ? gap : 0);
+  }
+  if(romaji){
+    ctx.font = '700 ' + Math.round(romajiSize) + "px 'Playfair Display'";
+    cardDrawLetterSpaced(ctx, romaji, W/2, cursorY + romajiSize*0.70, romajiSize*0.14);
+  }
+}
+
+function cardDrawLogoBlock(ctx, W, top, bandH, logoImage){
+  if(!logoImage || !logoImage.naturalWidth) return;
+  const targetW = W * STAFFCARD_LOGO_WIDTH_FRAC;
+  const aspect = logoImage.naturalHeight / logoImage.naturalWidth;
+  const targetH = targetW * aspect;
+  const x = (W - targetW) / 2;
+  const y = top + (bandH - targetH) / 2;
+  ctx.drawImage(logoImage, x, y, targetW, targetH);
+}
+
+function drawStaffCard(ctx, W, H, photoImg, kanji, romaji, logoImage){
+  ctx.clearRect(0,0,W,H);
+  if(photoImg) ctx.drawImage(photoImg, 0, 0, W, H);
+  else cardDrawPlaceholderPhoto(ctx, W, H);
+
+  const div1Y = H * STAFFCARD_DIV1_FRAC;
+  const div2Y = H * STAFFCARD_DIV2_FRAC;
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = Math.max(1, H * 0.0014);
+  ctx.beginPath();
+  ctx.moveTo(0, div1Y); ctx.lineTo(W, div1Y);
+  ctx.moveTo(0, div2Y); ctx.lineTo(W, div2Y);
+  ctx.stroke();
+
+  cardDrawNameBlock(ctx, W, div1Y, div2Y - div1Y, kanji, romaji);
+  cardDrawLogoBlock(ctx, W, div2Y, H - div2Y, logoImage);
 }
 
 init();
