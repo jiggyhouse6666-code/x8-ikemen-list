@@ -322,7 +322,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-24 - 2026-10-11';
+const BUILD_STAMP = 'otokohon-25 - 2026-10-11';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -603,7 +603,10 @@ async function init(){
   document.getElementById('staffStockFileInput').addEventListener('change', onStaffStockFileSelected);
   // Catches a page left open across midnight: without this, the attendance
   // listeners below would keep watching yesterday's (now frozen) doc forever.
-  setInterval(refreshTodayKeysAndResubscribe, 60000);
+  // Also ticks the 2時/正午 force-clear boundary (see tickGalleryForceClear)
+  // each minute, since that one isn't covered by refreshTodayKeysAndResubscribe's
+  // own change-detection.
+  setInterval(()=>{ refreshTodayKeysAndResubscribe(); tickGalleryForceClear(); }, 60000);
 }
 
 // .info/connected is a special Firebase-SDK path that always lives at the
@@ -894,7 +897,33 @@ function orderedStaffList(){
 // (everyone, both kinds of hidden staff included), since relative order —
 // and the 運営/非表示 toggles themselves — need to be set up for staff
 // before their first shift too.
+//
+// 深夜の「退勤タップ忘れ」対策: 2時(26時)を過ぎたら、実際の出退勤データが
+// 何であろうと強制的に「誰もいない」扱いにする——「25時か26時すぎたら全員
+// の強制的に消していいよ、この時間はみんな退勤しとるけ」という指示による。
+// 25時/26時どちらでも良いとのことだったので、消し忘れをより確実に拾える
+// 安全側の26時(2時)を採用（1時にしたい場合はSTART_HOURを1に変えるだけで
+// よい）。正午で解除するのは、開店〜通常営業時間帯には絶対にかからない
+// よう、深夜〜午前中だけに限定する範囲にするため。reorder画面
+// (orderedStaffList、上記)はこの対象外なので、この時間帯でも運営は普段
+// 通りスタッフ設定を操作できる。
+const GALLERY_FORCE_CLEAR_START_HOUR = 2;  // 26時(2時)から
+const GALLERY_FORCE_CLEAR_END_HOUR = 12;   // 正午の手前まで
+function isGalleryForceClearActive(){
+  const h = new Date().getHours();
+  return h >= GALLERY_FORCE_CLEAR_START_HOUR && h < GALLERY_FORCE_CLEAR_END_HOUR;
+}
+let galleryForceClearWasActive = isGalleryForceClearActive();
+// refreshTodayKeysAndResubscribe の60秒ごとのチェックは、業務日のキー
+// （1時で切り替わる）が変わった時しか再描画しない——2時や正午の切り替わり
+// はそれとは別物なので、専用の変化検知で拾う（init() 内の setInterval
+// から毎分呼ばれる）。
+function tickGalleryForceClear(){
+  const active = isGalleryForceClearActive();
+  if(active!==galleryForceClearWasActive){ galleryForceClearWasActive = active; renderApp(); }
+}
 function visibleGalleryStaffList(){
+  if(isGalleryForceClearActive()) return [];
   return orderedStaffList().filter(s=>attendanceStatus[s.id] && !excludedStaff[s.id] && !galleryHidden[s.id]);
 }
 
