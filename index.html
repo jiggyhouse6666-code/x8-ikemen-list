@@ -353,7 +353,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-31 - 2026-10-11';
+const BUILD_STAMP = 'otokohon-33 - 2026-10-11';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -703,6 +703,7 @@ async function init(){
   document.getElementById('app').addEventListener('keydown', onAppKeydown);
   document.getElementById('app').addEventListener('focusin', onAppFocusIn);
   document.getElementById('app').addEventListener('input', onAppInput);
+  document.getElementById('app').addEventListener('compositionend', onAppCompositionEnd);
   document.getElementById('main').addEventListener('pointerdown', onMainPointerDown);
   document.getElementById('main').addEventListener('pointermove', onMainPointerMove);
   document.getElementById('main').addEventListener('pointerup', onMainPointerUp);
@@ -2104,9 +2105,51 @@ function onAppFocusIn(e){
 // that if an unrelated Firebase update forces a re-render while the admin
 // is mid-paste, rankImportHtml() can restore exactly what they'd typed
 // instead of silently reverting to the last-saved table.
+// otokohon-33: on a real iPhone, 固まる was still reported "変換候補を選ん
+// でいる最中" (mid candidate-cycling, before committing) even after
+// otokohon-32 added the e.isComposing skip below. isComposing is correctly
+// true for Chromium's own composition events (verified directly in
+// verify_staff_card_ime_composition.js), but mobile Safari's software
+// keyboard has a known history of NOT reliably firing composition events /
+// isComposing in step with iOS's own kana->kanji candidate bar -- so on a
+// real device, otokohon-32's skip may simply never trigger during that
+// phase, leaving every rapid candidate flick still running a full
+// redrawStaffCardPreview() with nothing to stop them queuing up back to
+// back -- which matches "画面全体が完全に動かなくなる" (the whole screen
+// stops responding, not just a brief stutter) far better than a single
+// slow redraw would. Fixed at a different layer that doesn't depend on
+// isComposing being reported correctly at all: coalesce any burst of
+// same-frame redraw requests into at most one actual redraw per animation
+// frame, via scheduleStaffCardPreviewRedraw below. A dozen candidate
+// updates arriving faster than the screen can paint now cost one redraw,
+// not twelve queued back to back -- regardless of what iOS's IME does or
+// doesn't report. The isComposing skip is kept too (still a correct,
+// harmless optimization on engines that DO report it accurately) but is
+// no longer the only thing standing between a fast input burst and a pile
+// of synchronous redraws.
+let staffCardPreviewRedrawScheduled = false;
+function scheduleStaffCardPreviewRedraw(){
+  if(staffCardPreviewRedrawScheduled) return;
+  staffCardPreviewRedrawScheduled = true;
+  requestAnimationFrame(()=>{
+    staffCardPreviewRedrawScheduled = false;
+    // Reads the input fields' CURRENT values at paint time, same as every
+    // other redrawStaffCardPreview() call -- so coalescing several queued
+    // requests into one never drops or staleness-shows an intermediate
+    // edit; whatever the fields hold by the time this frame actually runs
+    // is exactly what gets drawn.
+    redrawStaffCardPreview();
+  });
+}
 function onAppInput(e){
   if(e.target && e.target.id==='rankImportTextarea') rankImportDraft = e.target.value;
-  else if(e.target && (e.target.id==='staffCardKanjiInput' || e.target.id==='staffCardRomajiInput')) redrawStaffCardPreview();
+  else if(e.target && (e.target.id==='staffCardKanjiInput' || e.target.id==='staffCardRomajiInput')){
+    if(e.isComposing) return;
+    scheduleStaffCardPreviewRedraw();
+  }
+}
+function onAppCompositionEnd(e){
+  if(e.target && (e.target.id==='staffCardKanjiInput' || e.target.id==='staffCardRomajiInput')) scheduleStaffCardPreviewRedraw();
 }
 
 /* ---------- render ---------- */
