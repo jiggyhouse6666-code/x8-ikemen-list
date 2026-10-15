@@ -1005,8 +1005,16 @@ function isGalleryForceClearActive(){
 // 26時を過ぎたら、前日分(yesterdayDoc)の退勤押し忘れは二度と「出勤中」に数え
 // ない。当日分(todayDoc/literalTodayDoc)は対象外なので、今日ちゃんと出勤した
 // 人の表示には何も影響しない。
+// 「26時を過ぎたら二度と戻らない」のはずだったが、素朴にgetHours()>=2だけで
+// 判定すると、日付が変わった瞬間(0時台)に毎晩falseへ戻ってしまうバグがあった。
+// 0時台は「前日の26時」から見ればすでに丸一日近く経っており、本来は常に
+// 「期限切れ」側であるべき——なのに0時台だけ判定が緩んで、前日分の退勤押し
+// 忘れが0時〜1時の間だけ「出勤中」に化けて復活していた(やまとの件の調査で発覚)。
+// 正しくは「業務日が切り替わった直後(1時台)の猶予」だけがfalseで、それ以外は
+// 0時台も含めて常にtrue。
 function isYesterdayCarryoverExpired(){
-  return new Date().getHours() >= GALLERY_FORCE_CLEAR_START_HOUR;
+  const h = new Date().getHours();
+  return !(h >= 1 && h < GALLERY_FORCE_CLEAR_START_HOUR);
 }
 let galleryForceClearWasActive = isGalleryForceClearActive();
 let yesterdayCarryoverWasExpired = isYesterdayCarryoverExpired();
