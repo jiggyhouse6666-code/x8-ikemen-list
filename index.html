@@ -421,18 +421,26 @@ function blobToDataUrl(blob){
     reader.readAsDataURL(blob);
   });
 }
-// Same quality ladder as X8 TIME CHECK's own 宣材写真 upload — this app
-// writes to the exact same staffPhotos/{id} node, so it should produce the
-// exact same kind of file.
+// 「イケメンリストの写真、拡大するとボケる/汚い」との指摘で上げた画質ラダー。
+// 元は640px上限(X8 TIME CHECK側の宣材写真アップロードと同じ値 — 同じ
+// staffPhotos/{id}に書くので揃えてあった)。拡大表示(.viewer-photo、画面
+// いっぱいに表示される)で見るとそれでは粗く見えるため、こちら(イケメン
+// リスト側のアップロード)だけ上限を900pxまで引き上げ、容量上限も比例して
+// 増やした。TIME CHECK側は今回あえて手を付けていない(本人の指示)ので、
+// TIME CHECK経由でアップロードした写真は当面このラダーより低画質のまま
+// ——画質を本当に揃えたいなら、いずれTIME CHECK側の同等コードも同じ値に
+// 合わせる必要がある。
 const STAFF_PHOTO_ATTEMPTS = [
-  { w: 640, q: 0.78 },
-  { w: 560, q: 0.72 },
-  { w: 480, q: 0.68 },
-  { w: 400, q: 0.6 },
-  { w: 320, q: 0.55 },
-  { w: 240, q: 0.5 },
+  { w: 900, q: 0.80 },
+  { w: 800, q: 0.76 },
+  { w: 700, q: 0.72 },
+  { w: 640, q: 0.68 },
+  { w: 560, q: 0.62 },
+  { w: 480, q: 0.58 },
+  { w: 400, q: 0.52 },
+  { w: 320, q: 0.48 },
 ];
-const STAFF_PHOTO_MAX_CHARS = 350000;
+const STAFF_PHOTO_MAX_CHARS = 700000;
 async function makeCompressedDataUrl(fileOrBlob, attempts, capChars){
   let img;
   try{ img = await loadImageFromFile(fileOrBlob); }catch(e){ return null; }
