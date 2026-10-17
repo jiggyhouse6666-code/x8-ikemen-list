@@ -287,6 +287,33 @@ main.full-bleed{padding:0; overflow:hidden;}
 .modal-actions{display:flex; gap:8px; margin-top:6px;}
 .modal-actions .btn{flex:1;}
 
+/* ===== crop editor (写真の位置・ズーム調整) ===== */
+/* 2026-10-17: modalState/renderApp/renderModal()の仕組みとは完全に独立した
+   専用オーバーレイ。renderApp()は出退勤などFirebaseの更新のたびに走り、
+   最後に必ずrenderModal()も呼ぶ(=#modalElの中身を毎回作り直す)。もしこの
+   エディタをmodalState経由にしていたら、スライダーをドラッグしている
+   最中に無関係な更新が割り込んでDOMごと作り直され、操作中の状態が消える
+   事故になりかねなかった(詳細はopenCropEditor()手前のコメント参照)。 */
+.crop-editor-overlay{
+  position:fixed; inset:0; background:rgba(10,8,14,0.82); z-index:200;
+  display:flex; align-items:center; justify-content:center; padding:20px;
+  overflow-y:auto;
+}
+.crop-editor-box{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:18px; width:100%; max-width:380px;
+}
+.crop-editor-title{font-size:15px; font-weight:700; color:var(--text); text-align:center; margin-bottom:14px;}
+.crop-editor-canvas-wrap{
+  width:100%; aspect-ratio:3/4; border-radius:10px; overflow:hidden;
+  border:1px solid var(--border); margin-bottom:16px; background:#0a080e;
+}
+.crop-editor-canvas-wrap canvas{width:100%; height:100%; display:block;}
+.crop-editor-label{font-size:12.5px; color:var(--gold); letter-spacing:0.5px; font-weight:700; margin:0 0 4px;}
+.crop-slider{width:100%; accent-color:var(--gold); margin:2px 0 4px; display:block;}
+.crop-editor-actions{display:flex; gap:8px; margin-top:16px;}
+.crop-editor-actions .btn{flex:1;}
+
 /* ===== toast ===== */
 #toast{
   position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom,0px)); transform:translateX(-50%) translateY(20px);
@@ -1818,6 +1845,180 @@ async function doRemoveStaffPhoto(id){
   }catch(e){ showToast('削除に失敗しました'); }
 }
 
+// ---- 写真の位置・ズーム調整エディタ ----
+// 2026-10-17: 「イケメンリストの画像高さ全部合わせること出来る？」との
+// 要望で追加。本棚グリッドの枠(.book-card)自体はaspect-ratio:3/4で既に
+// 統一されているので、枠のサイズがバラバラなわけではない。写真ごとに
+// 被写体の写り方(顔アップの人・全身の人)がバラバラなまま、
+// object-fit:coverが毎回「写真の中央」を機械的に切り抜くだけだったので、
+// 枠は揃っていても中の人の大きさがバラバラに見えていた(実際に本番の
+// ギャラリーをスクショして確認済み)。STAFF CARD側で今日作った「位置・
+// ズーム」のスライダーと同じ考え方で、アップロード時(と、既存写真の
+// 再調整時)に管理者が手動で合わせられるようにし、その結果を書き出した
+// 画像そのものを保存する。表示側のCSSや、staffPhotos/{id}のデータ形式
+// (相変わらずdataUrl文字列1個だけ)は一切変えていないので、X8 TIME
+// CHECK側の読み書きとも完全互換。自動の顔検出は不採用 — STAFF CARD側の
+// 縦位置スライダーを作った際に試して「参考画像レベルの写真であっさり
+// 誤判定した」実績があり、手動スライダーの方が確実という判断は今回も
+// 踏襲した。
+const OTOKOHON_CROP_OUT_W = 900, OTOKOHON_CROP_OUT_H = 1200; // 3:4、本棚の枠(.book-card)と同じ比率
+const OTOKOHON_CROP_MAX_ZOOM = 3;
+let cropEditorEl = null; // 開いている間だけ非null。modalStateとは別管理。
+
+// 渡されるsourceは、新規アップロード時はFile、既存写真の再調整時は
+// 保存済みのdataUrl文字列 -- どちらもImageとして読み込めれば後続のcrop
+// 処理は共通なので、ここで吸収する。
+function loadImageFromSource(source){
+  if(typeof source === 'string'){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = source;
+    });
+  }
+  return loadImageFromFile(source);
+}
+
+// renderApp()は出退勤などFirebaseの更新のたびに呼ばれ(営業中は頻繁)、
+// 最後に必ずrenderModal()も呼んでいる(#modalElの中身を毎回作り直す)。
+// このエディタをmodalState経由にすると、スライダーをドラッグしている
+// 最中に無関係な更新が割り込んでDOMごと作り直され、操作中のcanvas/
+// スライダーの状態が消える事故になりかねない(パスワード入力欄に、まさに
+// 同種の事故を防ぐための特別なガードがrenderModal()に入っているのが
+// その実例)。それを避けるため、このエディタはmodalState/renderApp/
+// renderModal()を一切経由せず、自分だけで独立したオーバーレイを作って
+// 自分で破棄する -- 開いている間、他のFirebase更新や画面遷移の影響を
+// 一切受けない。
+async function openCropEditor(source, onSave){
+  if(cropEditorEl) return;
+  let img;
+  try{ img = await loadImageFromSource(source); }catch(e){ showToast('写真を読み込めませんでした'); return; }
+  if(!img.naturalWidth || !img.naturalHeight){ showToast('写真を読み込めませんでした'); return; }
+
+  const el = document.createElement('div');
+  el.className = 'crop-editor-overlay';
+  el.innerHTML = `
+    <div class="crop-editor-box">
+      <div class="crop-editor-title">表示位置・ズームを調整</div>
+      <div class="crop-editor-canvas-wrap"><canvas id="cropEditorCanvas"></canvas></div>
+      <div class="crop-editor-label">縦位置</div>
+      <input type="range" id="cropVPos" min="0" max="100" value="50" step="1" class="crop-slider">
+      <div class="crop-editor-label" style="margin-top:10px;">横位置</div>
+      <input type="range" id="cropHPos" min="0" max="100" value="50" step="1" class="crop-slider">
+      <div class="crop-editor-label" style="margin-top:10px;">ズーム</div>
+      <input type="range" id="cropZoom" min="0" max="100" value="0" step="1" class="crop-slider">
+      <div class="crop-editor-actions">
+        <button type="button" class="btn ghost block" id="cropCancelBtn">キャンセル</button>
+        <button type="button" class="btn gold block" id="cropSaveBtn">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(el);
+  cropEditorEl = el;
+
+  const canvas = el.querySelector('#cropEditorCanvas');
+  const ctx = canvas.getContext('2d');
+  // プレビューは軽量な縮小コピー経由で描く(STAFF CARDと同じ理由: ドラッグ
+  // 中に毎回フル解像度の元画像を描き直すと実機で重くなりうるため)。保存
+  // 時だけは元画像(img)からフル解像度で切り出す(下のcropSaveBtn参照)。
+  const previewMaxDim = 500;
+  const pScale = Math.min(1, previewMaxDim / Math.max(img.naturalWidth, img.naturalHeight));
+  const pc = document.createElement('canvas');
+  pc.width = Math.max(1, Math.round(img.naturalWidth * pScale));
+  pc.height = Math.max(1, Math.round(img.naturalHeight * pScale));
+  pc.getContext('2d').drawImage(img, 0, 0, pc.width, pc.height);
+  canvas.width = 300; canvas.height = 400; // 3:4。実際の表示サイズはCSS側で可変。
+
+  let vPos = 0.5, hPos = 0.5, zoom = 0;
+
+  // 出力フレームは常に3:4固定(本棚の枠に合わせてあるため、STAFF CARDの
+  // ようにフレーム自体の縦横比を可変にはしない)。縦位置・横位置・ズーム
+  // は、そのフレームの中に元画像の「どこを、どれだけ拡大して見せるか」
+  // を決めるパン+ズームの3軸。初期値(50/50/0)は、object-fit:coverが今
+  // までやっていたのと全く同じ「中央を等倍のまま表示」になるよう設計して
+  // あるので、何も動かさずに保存しても見た目は変わらない(=既存の表示と
+  // 常に後方互換)。
+  function computeSrcRect(srcW, srcH){
+    const baseScale = Math.max(OTOKOHON_CROP_OUT_W / srcW, OTOKOHON_CROP_OUT_H / srcH);
+    const scale = baseScale * (1 + zoom * (OTOKOHON_CROP_MAX_ZOOM - 1));
+    const visW = OTOKOHON_CROP_OUT_W / scale, visH = OTOKOHON_CROP_OUT_H / scale;
+    return { sx: hPos * (srcW - visW), sy: vPos * (srcH - visH), sw: visW, sh: visH };
+  }
+  function redraw(){
+    const r = computeSrcRect(pc.width, pc.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(pc, r.sx, r.sy, r.sw, r.sh, 0, 0, canvas.width, canvas.height);
+  }
+  redraw();
+
+  let raf = null;
+  function onSliderInput(){
+    vPos = Number(el.querySelector('#cropVPos').value) / 100;
+    hPos = Number(el.querySelector('#cropHPos').value) / 100;
+    zoom = Number(el.querySelector('#cropZoom').value) / 100;
+    if(raf) return;
+    raf = requestAnimationFrame(() => { raf = null; redraw(); });
+  }
+  el.querySelector('#cropVPos').addEventListener('input', onSliderInput);
+  el.querySelector('#cropHPos').addEventListener('input', onSliderInput);
+  el.querySelector('#cropZoom').addEventListener('input', onSliderInput);
+
+  function closeEditor(){ el.remove(); cropEditorEl = null; }
+  el.querySelector('#cropCancelBtn').addEventListener('click', closeEditor);
+  el.querySelector('#cropSaveBtn').addEventListener('click', async () => {
+    const saveBtn = el.querySelector('#cropSaveBtn');
+    saveBtn.disabled = true; saveBtn.textContent = '保存中…';
+    try{
+      const r = computeSrcRect(img.naturalWidth, img.naturalHeight);
+      const out = document.createElement('canvas');
+      out.width = OTOKOHON_CROP_OUT_W; out.height = OTOKOHON_CROP_OUT_H;
+      out.getContext('2d').drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, out.width, out.height);
+      const blob = await new Promise(res => out.toBlob(res, 'image/jpeg', 0.92));
+      if(!blob){ showToast('画像の生成に失敗しました'); saveBtn.disabled=false; saveBtn.textContent='保存'; return; }
+      const dataUrl = await makeCompressedDataUrl(blob, STAFF_PHOTO_ATTEMPTS, STAFF_PHOTO_MAX_CHARS);
+      if(!dataUrl){ showToast('写真の処理に失敗しました'); saveBtn.disabled=false; saveBtn.textContent='保存'; return; }
+      closeEditor();
+      await onSave(dataUrl);
+    }catch(err){
+      showToast('保存に失敗しました');
+      if(el.isConnected){ saveBtn.disabled = false; saveBtn.textContent = '保存'; }
+    }
+  });
+  // 背景タップで閉じる(既存のモーダルと同じ作法)。開いた直後の合成
+  // クリックで即閉じないよう、同じく少し猶予を置く。
+  const openedAt = Date.now();
+  el.addEventListener('click', (ev) => { if(ev.target === el && Date.now() - openedAt > 250) closeEditor(); });
+}
+
+// 詳細画面の「位置・ズームを調整」ボタン用。既にstaffPhotos/stockとして
+// 保存済みの写真を再度このエディタで開き直し、同じ場所に上書き保存する
+// (新規ファイル選択なしで、今アクティブな写真をその場で調整できる —
+// 今日アップロード済みの写真をまとめて直す時はこちらを使う)。
+function requestAdjustPhoto(staffId, kind, imgId){
+  if(!db) return;
+  let source;
+  if(kind === 'stock'){
+    const stock = staffPhotoStock[staffId];
+    const stockImg = stock && stock.images && stock.images[imgId];
+    if(!stockImg){ showToast('画像が見つかりませんでした'); return; }
+    source = stockImg.dataUrl;
+  } else {
+    source = staffPhotos[staffId];
+    if(!source){ showToast('画像が見つかりませんでした'); return; }
+  }
+  openCropEditor(source, async (dataUrl) => {
+    try{
+      if(kind === 'stock'){
+        await db.doc('staffPhotoStock/' + staffId).update({ images: { [imgId]: { dataUrl, ts: Date.now() } } });
+      } else {
+        await db.doc('staffPhotos/' + staffId).set({ dataUrl, ts: Date.now() });
+      }
+      showToast('位置を調整しました');
+    }catch(err){ showToast('保存に失敗しました'); }
+  });
+}
+
 // Uploads write to staffPhotos/{id} — the SAME node X8 TIME CHECK's own
 // 設定 tab manages — so a new 宣材写真 added from either app shows up in
 // both, and immediately becomes the active 男本 photo.
@@ -1830,14 +2031,15 @@ async function onPromoPhotoFileSelected(e){
   e.target.value = '';
   const staffId = activeStaffId;
   if(!file || !staffId || !db) return;
-  showToast('写真をアップロード中…');
-  try{
-    const dataUrl = await makeCompressedDataUrl(file, STAFF_PHOTO_ATTEMPTS, STAFF_PHOTO_MAX_CHARS);
-    if(!dataUrl){ showToast('写真の処理に失敗しました'); return; }
-    await db.doc('staffPhotos/' + staffId).set({ dataUrl, ts: Date.now() });
-    await db.doc('otokohonSelection/' + staffId).set({ kind:'staffPhoto', ts: Date.now() });
-    showToast('写真を登録しました');
-  }catch(err){ showToast('写真の保存に失敗しました'); }
+  // 2026-10-17: 直接保存せず、まず位置・ズーム調整エディタを開く(詳細は
+  // openCropEditor手前のコメント参照)。保存はエディタの「保存」ボタンから。
+  openCropEditor(file, async (dataUrl) => {
+    try{
+      await db.doc('staffPhotos/' + staffId).set({ dataUrl, ts: Date.now() });
+      await db.doc('otokohonSelection/' + staffId).set({ kind:'staffPhoto', ts: Date.now() });
+      showToast('写真を登録しました');
+    }catch(err){ showToast('写真の保存に失敗しました'); }
+  });
 }
 
 // 宣材写真ストック: a small pool of extra candidate photos per staff
@@ -1856,17 +2058,18 @@ async function onStaffStockFileSelected(e){
   if(!file || !staffId || !db) return;
   const existingCount = Object.keys((staffPhotoStock[staffId] && staffPhotoStock[staffId].images) || {}).length;
   if(existingCount >= STAFF_PHOTO_STOCK_MAX){ showToast('ストックは最大' + STAFF_PHOTO_STOCK_MAX + '枚までです'); return; }
-  showToast('画像をアップロード中…');
-  try{
-    const dataUrl = await makeCompressedDataUrl(file, STAFF_PHOTO_ATTEMPTS, STAFF_PHOTO_MAX_CHARS);
-    if(!dataUrl){ showToast('画像の処理に失敗しました'); return; }
-    const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
-    await db.doc('staffPhotoStock/' + staffId).update({
-      images: { [imgId]: { dataUrl, ts: Date.now() } },
-    });
-    await db.doc('otokohonSelection/' + staffId).set({ kind:'stock', imgId, ts: Date.now() });
-    showToast('画像を追加しました');
-  }catch(err){ showToast('画像の保存に失敗しました'); }
+  // 2026-10-17: こちらも宣材写真と同様、直接保存せずまず位置・ズーム
+  // 調整エディタを開く。
+  openCropEditor(file, async (dataUrl) => {
+    try{
+      const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+      await db.doc('staffPhotoStock/' + staffId).update({
+        images: { [imgId]: { dataUrl, ts: Date.now() } },
+      });
+      await db.doc('otokohonSelection/' + staffId).set({ kind:'stock', imgId, ts: Date.now() });
+      showToast('画像を追加しました');
+    }catch(err){ showToast('画像の保存に失敗しました'); }
+  });
 }
 function confirmRemoveStaffStockPhoto(staffId, imgId){
   showConfirmModal('この画像をストックから削除しますか？', ()=>doRemoveStaffStockPhoto(staffId, imgId));
@@ -2002,6 +2205,7 @@ function onAppClick(e){
   else if(action==='selectStaffStockPhoto') selectStaffStockPhoto(el.dataset.id, el.dataset.imgid);
   else if(action==='pickStaffStockFile') pickStaffStockFile();
   else if(action==='removeStaffStockPhoto') confirmRemoveStaffStockPhoto(el.dataset.id, el.dataset.imgid);
+  else if(action==='requestAdjustPhoto') requestAdjustPhoto(el.dataset.id, el.dataset.kind, el.dataset.imgid);
   else if(action==='modalCancel') closeModal();
   else if(action==='modalPasswordSubmit') submitModalPassword();
   else if(action==='modalConfirmYes') modalConfirmYes();
@@ -2221,12 +2425,25 @@ function detailViewerHtml(staff){
 
 function detailEditorHtml(staff){
   const photo = resolvedGalleryPhotos[staff.id];
+  // 「位置・ズームを調整」ボタンは、今アクティブな写真が宣材写真かスト
+  // ックの時だけ出す(保存先が決まるため)。レガシーなクロックイン写真が
+  // アクティブな時は、調整して上書き保存する先が無い一時的な表示なので
+  // ボタン自体を出さない。
+  const sel = selection[staff.id];
+  const stockActive = sel && sel.kind === 'stock';
+  const stockImagesForAdjust = (staffPhotoStock[staff.id] && staffPhotoStock[staff.id].images) || {};
+  const adjustTarget = stockActive
+    ? (stockImagesForAdjust[sel.imgId] ? { kind:'stock', imgId: sel.imgId } : null)
+    : (staffPhotos[staff.id] ? { kind:'staffPhoto' } : null);
   return `
     <div class="detail-hero">
       ${photo
         ? `<img class="detail-photo" src="${photo}" alt="">`
         : `<div class="detail-photo placeholder" style="background:${colorFor(staff.id)}">${escapeHtml((staff.name||'?').slice(0,1))}</div>`}
     </div>
+    ${adjustTarget ? `
+      <button class="btn ghost block" style="margin:-6px 0 18px;" data-action="requestAdjustPhoto" data-id="${escapeHtml(staff.id)}" data-kind="${adjustTarget.kind}"${adjustTarget.kind==='stock' ? ` data-imgid="${escapeHtml(adjustTarget.imgId)}"` : ''}>表示位置・ズームを調整</button>
+    ` : ''}
     <div class="detail-name">${escapeHtml(staff.name)}</div>
     ${pickerHtml(staff)}
     <div class="hint" style="margin-top:28px;">バージョン ${escapeHtml(BUILD_STAMP)}</div>
