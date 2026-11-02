@@ -362,7 +362,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-37 - 2026-10-24';
+const BUILD_STAMP = 'otokohon-38 - 2026-11-02';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -1706,10 +1706,15 @@ function formatNameRankTable(table){
 // number are silently skipped rather than rejecting the whole paste.
 function parseRankImportText(text){
   const table = {};
-  String(text||'').split(/\r?\n/).forEach(line=>{
-    const trimmed = line.trim();
-    if(!trimmed) return;
-    const m = trimmed.match(/^(.*\S)[\t,\s]+(\d+)\s*$/);
+  const lines = String(text||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const numbered = /^(.*\S)[\t,\s]+(\d+)\s*$/;
+  // 名前だけを上から順に入れた場合(数字が1行もない): 上から1位、2位…の順位として扱う
+  if(lines.length && !lines.some(l=>numbered.test(l))){
+    lines.forEach((l, i)=>{ table[l] = i + 1; });
+    return table;
+  }
+  lines.forEach(trimmed=>{
+    const m = trimmed.match(numbered);
     if(m) table[m[1].trim()] = parseInt(m[2], 10);
   });
   return table;
@@ -1762,7 +1767,7 @@ async function saveRankImport(){
   const text = ta ? ta.value : (rankImportDraft || '');
   const parsed = expandNameRankAliases(parseRankImportText(text));
   const count = Object.keys(parsed).length;
-  if(!count){ showToast('「名前　数字」の行が見つかりませんでした'); return; }
+  if(!count){ showToast('名前が見つかりませんでした（1行に1人、上から順に入れてください）'); return; }
   nameRankTable = parsed;
   rebuildNameRankTableNormalized();
   // Everyone who already has a photo right now is "already accounted for"
@@ -2409,11 +2414,12 @@ function rankImportHtml(){
   const text = rankImportDraft!==null ? rankImportDraft : formatNameRankTable(nameRankTable);
   return `
     <div class="rank-import-intro">
-      Excelなどで「名前」と「数字」の2列を選んでコピーし、下の欄にそのまま貼り付けて「保存して反映」を押してください（1行に1人分、名前の後に数字）。<br><br>
-      例：<br>たろう　1<br>じろう　2<br>さぶろう　3<br><br>
+      下の欄に、並べたい順に名前を上から入れて「保存して反映」を押してください（1行に1人。一番上が1位です）。<br><br>
+      例：<br>たろう<br>じろう<br>さぶろう<br><br>
+      「名前　数字」の形（Excelの2列コピー）でも入れられます。<br><br>
       名前が一致する人は、宣材写真が登録済みなら保存した瞬間に、まだ写真がない人は写真が上がり次第、自動でその順位に並び替わります。カタカナ/ひらがな/ローマ字表記の違いは自動で吸収されます（トム/とむ/TOMなど）。それでも一致しない呼び方がある場合は、名前を「/」で区切って並べてください（例：くまこ/ちび　4）。
     </div>
-    <textarea id="rankImportTextarea" class="rank-textarea" placeholder="たろう　1&#10;じろう　2&#10;さぶろう　3">${escapeHtml(text)}</textarea>
+    <textarea id="rankImportTextarea" class="rank-textarea" placeholder="たろう&#10;じろう&#10;さぶろう">${escapeHtml(text)}</textarea>
     <button class="btn gold block" style="margin-top:12px;" data-action="saveRankImport">保存して反映</button>
   `;
 }
