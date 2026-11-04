@@ -362,7 +362,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-38 - 2026-11-02';
+const BUILD_STAMP = 'otokohon-40 - 2026-11-04';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -1599,7 +1599,24 @@ function rebuildNameRankTableNormalized(){
   nameRankTableNormalized = next;
 }
 function rankForStaffName(name){
-  return nameRankTableNormalized[normalizeNameForMatch(name)];
+  const n = normalizeNameForMatch(name);
+  if(Object.prototype.hasOwnProperty.call(nameRankTableNormalized, n)) return nameRankTableNormalized[n];
+  // 名前がフルで合っていなくても、片方がもう片方を含んでいれば同じ人とみなす
+  // （2文字以上・一人だけに絞れるときだけ。複数に当てはまるときは当てない）
+  if(n.length < 2) return undefined;
+  // ほかの人とフルネームでぴったり合っている行は、この人には使わない
+  const takenByExact = new Set((staffList||[]).map(x=>normalizeNameForMatch(x.name)));
+  takenByExact.delete(n);
+  let best = null, bestScore = 0, tie = false;
+  Object.keys(nameRankTableNormalized).forEach(k=>{
+    if(k.length < 2) return;
+    if(takenByExact.has(k)) return;
+    if(!(k.includes(n) || n.includes(k))) return;
+    const score = Math.min(k.length, n.length);
+    if(score > bestScore){ best = k; bestScore = score; tie = false; }
+    else if(score === bestScore && nameRankTableNormalized[k] !== nameRankTableNormalized[best]) tie = true;
+  });
+  return (best !== null && !tie) ? nameRankTableNormalized[best] : undefined;
 }
 
 // Inserts `id` (whose stored rank is `rank`) right before the first OTHER
