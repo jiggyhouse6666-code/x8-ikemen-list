@@ -362,7 +362,7 @@ import {
   goOnline as fbGoOnline
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
 
-const BUILD_STAMP = 'otokohon-40 - 2026-11-04';
+const BUILD_STAMP = 'otokohon-42 - 2026-11-04';
 
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDfHz5djZU4ZsJKY9DsfQOJt3D7pdSOHqU",
@@ -1573,14 +1573,28 @@ function romajiToHiraOrNull(lower){
   }
   return out;
 }
+// 長音「ー」を、前の文字の母音に直す（こーき=こうき、らーめん=らあめん）
+const HIRA_ROW_A = 'ぁあかがさざただなはばぱまゃやらわゎ', HIRA_ROW_I = 'ぃいきぎしじちぢにひびぴみり', HIRA_ROW_U = 'ぅうくぐすずっつづぬふぶぷむゅゆるゔ', HIRA_ROW_E = 'ぇえけげせぜてでねへべぺめれ', HIRA_ROW_O = 'ぉおこごそぞとどのほぼぽもょよろをん';
+function foldLongVowelForMatch(s){
+  return s.replace(/(.)ー+/g, (m, c)=>{
+    if(HIRA_ROW_A.includes(c)) return c + 'あ';
+    if(HIRA_ROW_I.includes(c)) return c + 'い';
+    if(HIRA_ROW_U.includes(c)) return c + 'う';
+    if(HIRA_ROW_E.includes(c)) return c + 'い';
+    if(HIRA_ROW_O.includes(c)) return c + 'う';
+    return c;
+  });
+}
 function normalizeNameForMatch(name){
-  let s = String(name||'').normalize('NFKC').trim().replace(/\s+/g, ' ');
+  let s = String(name||'').normalize('NFKC').trim();
+  // スペース・記号・中点・かっこなど、名前じゃない文字は全部捨てる
+  s = s.replace(/[^\p{L}\p{N}ー]/gu, '');
   s = foldVuRowForMatch(kataToHiraForMatch(s));
   if(/^[a-zA-Z]+$/.test(s)){
     const conv = romajiToHiraOrNull(s.toLowerCase());
     if(conv) s = conv;
   }
-  return s;
+  return foldLongVowelForMatch(s);
 }
 let nameRankTableNormalized = {}; // normalized-name -> rank, rebuilt whenever nameRankTable changes
 function rebuildNameRankTableNormalized(){
@@ -1598,23 +1612,36 @@ function rebuildNameRankTableNormalized(){
   });
   nameRankTableNormalized = next;
 }
+// 「月街乃愛（つきまちのあ）」のように、漢字名＋（読み）で入っている名前は、
+// 全体・かっこの前・かっこの中の読み、のどれかが合えば同じ人とみなす
+function nameCandidatesForMatch(name){
+  const raw = String(name||'').normalize('NFKC').trim();
+  const out = [raw];
+  const m = raw.match(/^(.*?)\s*[(（]\s*(.+?)\s*[)）]\s*$/);
+  if(m){ if(m[1]) out.push(m[1]); if(m[2]) out.push(m[2]); }
+  return Array.from(new Set(out.map(normalizeNameForMatch).filter(Boolean)));
+}
 function rankForStaffName(name){
-  const n = normalizeNameForMatch(name);
-  if(Object.prototype.hasOwnProperty.call(nameRankTableNormalized, n)) return nameRankTableNormalized[n];
+  const cands = nameCandidatesForMatch(name);
+  if(!cands.length) return undefined;
+  for(const n of cands){
+    if(Object.prototype.hasOwnProperty.call(nameRankTableNormalized, n)) return nameRankTableNormalized[n];
+  }
   // 名前がフルで合っていなくても、片方がもう片方を含んでいれば同じ人とみなす
   // （2文字以上・一人だけに絞れるときだけ。複数に当てはまるときは当てない）
-  if(n.length < 2) return undefined;
-  // ほかの人とフルネームでぴったり合っている行は、この人には使わない
-  const takenByExact = new Set((staffList||[]).map(x=>normalizeNameForMatch(x.name)));
-  takenByExact.delete(n);
+  const own = new Set(cands);
+  const takenByExact = new Set();
+  (staffList||[]).forEach(x=>{ nameCandidatesForMatch(x.name).forEach(c=>{ if(!own.has(c)) takenByExact.add(c); }); });
   let best = null, bestScore = 0, tie = false;
   Object.keys(nameRankTableNormalized).forEach(k=>{
-    if(k.length < 2) return;
-    if(takenByExact.has(k)) return;
-    if(!(k.includes(n) || n.includes(k))) return;
-    const score = Math.min(k.length, n.length);
-    if(score > bestScore){ best = k; bestScore = score; tie = false; }
-    else if(score === bestScore && nameRankTableNormalized[k] !== nameRankTableNormalized[best]) tie = true;
+    if(k.length < 2 || takenByExact.has(k)) return;
+    cands.forEach(n=>{
+      if(n.length < 2) return;
+      if(!(k.includes(n) || n.includes(k))) return;
+      const score = Math.min(k.length, n.length);
+      if(score > bestScore){ best = k; bestScore = score; tie = false; }
+      else if(score === bestScore && best !== k && nameRankTableNormalized[k] !== nameRankTableNormalized[best]) tie = true;
+    });
   });
   return (best !== null && !tie) ? nameRankTableNormalized[best] : undefined;
 }
