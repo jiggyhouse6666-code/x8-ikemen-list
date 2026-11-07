@@ -1684,7 +1684,7 @@ function applyNameRankOrderNow(){
   current.forEach(id=>{
     const s = byId[id];
     const rank = s && rankForStaffName(s.name);
-    if(s && Number.isFinite(rank) && staffPhotos[id]) ranked.push({ id, rank });
+    if(s && Number.isFinite(rank)) ranked.push({ id, rank });   // 写真の有無・運営かどうかに関係なく、ナンバーがある人は全員ナンバー順に並べる
     else rest.push(id);
   });
   ranked.sort((a,b)=>a.rank-b.rank);
@@ -1837,9 +1837,9 @@ async function saveRankImport(){
     const byId = {}; staffList.forEach(s=>{ byId[s.id] = s; });
     const appliedNow = newOrder.filter(id=>{
       const s = byId[id];
-      return s && Number.isFinite(parsed[s.name]) && staffPhotos[id];
+      return s && Number.isFinite(rankForStaffName(s.name));
     }).length;
-    showToast(count + '件を保存しました（今すぐ反映: ' + appliedNow + '人。写真が未登録の人は、写真が上がり次第自動で反映されます）');
+    showToast(count + '件を保存しました（今すぐ反映: ' + appliedNow + '人。ナンバーがある人は写真がなくても順番どおりに並べました）');
   }catch(e){ showToast('ナンバーの保存に失敗しました'); }
 }
 
